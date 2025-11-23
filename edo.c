@@ -341,8 +341,11 @@ draw_view(View *v) {
 		assert(l);
 
 		len = l->len - v->col_offset;
-		if(len > v->screen_cols)
-			len = v->screen_cols;
+
+		/* lines may be hidden when scrolling horizontally */
+		if(len < 0) continue;
+
+		if(len > v->screen_cols) len = v->screen_cols;
 		ui->draw_text(0, y, l->buf + v->col_offset, len);
 	}
 
@@ -384,11 +387,14 @@ run(void) {
 			else if(ev.key == 'h') view_cursor_left(vcur);
 			else if(ev.key == 'l') view_cursor_right(vcur);
 			else if(ev.key == 'q') running = 0;
-			else if(ev.key == '\n') {
+			else if(ev.key == 'K') {
+				Line *l = line_create(NULL);
+				buffer_insert_line(vcur->buf, vcur->line_num + 0, l);
+			}
+			else if(ev.key == 'J') {
 				Line *l = line_create(NULL);
 				buffer_insert_line(vcur->buf, vcur->line_num + 1, l);
 				view_cursor_down(vcur);
-				break;
 			} else {
 				line_insert_char(vcur->buf->lines[vcur->line_num], vcur->col_num, ev.key);
 				view_cursor_right(vcur);
