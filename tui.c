@@ -13,7 +13,6 @@
 #define CURPOS          "\33[%d;%dH"
 //#define CLEARLEFT       "\33[1K"
 #define CLEARRIGHT      "\33[0K"
-#define CLEARLINE       "\33[2K"
 #define CURHIDE         "\33[?25l"
 #define CURSHOW         "\33[?25h"
 
@@ -42,7 +41,7 @@ int tui_text_width(char *s, int len);
 void tui_get_window_size(int *rows, int *cols);
 void tui_exit(void);
 void tui_move_cursor(int x, int y);
-void tui_draw_text(int c, int r, char *txt, int len);
+void tui_draw_line(int c, int r, char *txt, int len);
 void tui_draw_symbol(int r, int c, Symbol sym);
 void tui_init(void);
 
@@ -116,8 +115,8 @@ tui_frame_flush(void) {
 
 int
 tui_text_width(char *s, int len) {
-	int w = 0, i;
 	int tabstop = 8;
+	int w = 0, i;
 
 	for(i = 0; i < len; i++) {
 		if(s[i] == '\t')
@@ -126,6 +125,21 @@ tui_text_width(char *s, int len) {
 			++w;
 	}
 	return w;
+}
+
+int
+tui_text_index_at(char *str, int target_x) {
+	int tabstop = 8;
+	int x = 0, i = 0, w;
+
+	while(str[i]) {
+		w = (str[i] == '\t') ? tabstop : 1;
+		if (x + w > target_x)
+			return i;
+		x += w;
+		i++;
+	}
+	return i;
 }
 
 void
@@ -146,9 +160,38 @@ tui_move_cursor(int c, int r) {
 }
 
 void
-tui_draw_text(int c, int r, char *txt, int len) {
-	tui_move_cursor(c, r);
-	ab_printf(&frame, CLEARLINE "%.*s", len, txt);
+tui_draw_line(int c, int r, char *txt, int len) {
+	if(c >= ws.ws_col || r >= ws.ws_row) return;
+
+	int x = c;
+	int tabstop = 8;
+	int i = 0;
+	int cw, clen;
+
+	tui_move_cursor(x < 0 ? 0 : x, r);
+	while(i < len) {
+		cw = (txt[i] == '\t' ? tabstop : 1);
+
+		if(x + cw <= 0)
+			continue;
+
+		if(txt[i] == '\t') {
+			int spaces = tabstop;
+			clen = 1;
+
+			if(x < 0) spaces += x;
+			if(x + cw > ws.ws_col) spaces -= (x + cw - ws.ws_col);
+			while(spaces--) ab_write(&frame, " ", 1);
+		} else {
+			if(x + cw > ws.ws_col) break;
+			clen = 1;
+			ab_write(&frame, txt + i, clen);
+		}
+
+		x += cw;
+		i += clen;
+	}
+	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
 
 void
@@ -161,7 +204,7 @@ tui_draw_symbol(int c, int r, Symbol sym) {
 	}
 
 	tui_move_cursor(c, r);
-	ab_printf(&frame, CLEARRIGHT "%c", symch);
+	ab_printf(&frame, "%c" CLEARRIGHT, symch);
 }
 
 void
@@ -210,8 +253,9 @@ UI ui_tui = {
 	.frame_start = tui_frame_start,
 	.frame_flush = tui_frame_flush,
 	.text_width = tui_text_width,
+	.text_index_at = tui_text_index_at,
 	.move_cursor = tui_move_cursor,
-	.draw_text = tui_draw_text,
+	.draw_line = tui_draw_line,
 	.draw_symbol = tui_draw_symbol,
 	.get_window_size = tui_get_window_size,
 	.next_event = tui_next_event

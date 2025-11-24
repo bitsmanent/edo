@@ -24,8 +24,9 @@ typedef struct {
 	void (*frame_start)(void);
 	void (*frame_flush)(void);
 	int (*text_width)(char *s, int len);
+	int (*text_index_at)(char *s, int idx);
 	void (*move_cursor)(int x, int y);
-	void (*draw_text)(int r, int c, char *txt, int len);
+	void (*draw_line)(int r, int c, char *txt, int len);
 	void (*draw_symbol)(int r, int c, Symbol sym);
 	void (*get_window_size)(int *rows, int *cols);
 	Event (*next_event)(void);

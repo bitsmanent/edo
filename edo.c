@@ -61,7 +61,8 @@ void view_cursor_left(View *v);
 void view_cursor_right(View *v);
 void view_cursor_up(View *v);
 void view_cursor_down(View *v);
-int view_col2x(View *v, Line *line, int col);
+int view_idx2col(View *v, Line *line, int idx);
+int view_col2idx(View *v, Line *line, int col);
 void view_scroll_fix(View *v);
 void draw_view(View *v);
 
@@ -277,7 +278,6 @@ view_cursor_left(View *v) {
 
 void
 view_cursor_right(View *v) {
-	//if(!v->buf->lines_tot) return;
 	Line *l = v->buf->lines[v->line_num];
 
 	if(v->col_num < l->len)
@@ -294,7 +294,6 @@ view_cursor_up(View *v) {
 
 void
 view_cursor_down(View *v) {
-	//if(!v->buf->lines_tot) return;
 	if(v->line_num < v->buf->lines_tot - 1) {
 		++v->line_num;
 		view_cursor_hfix(v);
@@ -302,9 +301,15 @@ view_cursor_down(View *v) {
 }
 
 int
-view_col2x(View *v, Line *line, int col) {
+view_idx2col(View *v, Line *line, int idx) {
 	(void)v;
-	return ui->text_width(line->buf, col);
+	return ui->text_width(line->buf, idx);
+}
+
+int
+view_col2idx(View *v, Line *line, int col) {
+	(void)v;
+	return ui->text_index_at(line->buf, col);
 }
 
 void
@@ -326,51 +331,40 @@ void
 draw_view(View *v) {
 	Line *l;
 	int row, len, y;
+	int idx, sx, shift;
 
 	ui->frame_start();
 	view_scroll_fix(v);
 
 	for(y = 0; y < v->screen_rows; y++) {
 		row = v->row_offset + y;
+
 		if(row >= v->buf->lines_tot) {
 			ui->draw_symbol(0, y, SYM_EMPTYLINE);
 			continue;
 		}
 
 		l = buffer_get_line(v->buf, row);
-		assert(l);
+		idx = view_col2idx(v, l, v->col_offset);
+		len = l->len - idx;
 
-		len = l->len - v->col_offset;
+		/* fine clipping */
+		sx = view_idx2col(v, l, idx);
+		shift = sx - v->col_offset;
 
-		/* lines may be hidden when scrolling horizontally */
-		if(len < 0) continue;
-
-		if(len > v->screen_cols) len = v->screen_cols;
-		ui->draw_text(0, y, l->buf + v->col_offset, len);
+		ui->draw_line(shift, y, l->buf + idx, len);
 	}
 
-	Line *curline = buffer_get_line(v->buf, v->line_num);
-	int cx, cy;
-	if(curline) {
-		cx = view_col2x(v, curline, v->col_num);     /* absolute */
-		cx -= view_col2x(v, curline, v->col_offset); /* offset */
-		cy = v->line_num - v->row_offset;
+	l = buffer_get_line(v->buf, v->line_num);
+	if(l) {
+		row = view_idx2col(v, l, v->col_num);
+		row -= v->col_offset;
+		y = v->line_num - v->row_offset;
 	} else {
-		cx = cy = 0;
+		row = y = 0;
 	}
 
-#if 0
-	char *t = ecalloc(1, 128);
-	int tl;
-	tl = snprintf(t, 128, "\"%s\" %ld lines [%dx%d] (%d/%d)",
-		v->buf->file_name ? v->buf->file_name : "[none]", v->buf->lines_tot,
-		v->screen_cols, v->screen_rows, v->col_num, v->buf->lines[0]->len
-	);
-	ui->draw_text(0, v->screen_rows, t, tl);
-	free(t);
-#endif
-
-	ui->move_cursor(cx, cy);
+	ui->move_cursor(row, y);
 	ui->frame_flush();
 }
 
