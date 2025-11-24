@@ -345,6 +345,10 @@ draw_view(View *v) {
 		}
 
 		l = buffer_get_line(v->buf, row);
+		if(!l->len) {
+			ui->draw_line(0, y, "", 0);
+			continue;
+		}
 		idx = view_col2idx(v, l, v->col_offset);
 		len = l->len - idx;
 
