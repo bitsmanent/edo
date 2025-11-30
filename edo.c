@@ -42,6 +42,7 @@ UI *ui;
 /* function declarations */
 void die(const char *fmt, ...);
 void *ecalloc(size_t nmemb, size_t size);
+void *erealloc(void *p, size_t size);
 void insert_char(char *dst, char c, int len);
 void delete_char(char *dst, int count, int len);
 void line_insert_char(Line *line, size_t index, char c);
@@ -92,6 +93,13 @@ ecalloc(size_t nmemb, size_t size) {
 	return p;
 }
 
+void *
+erealloc(void *p, size_t size) {
+	if(!(p = realloc(p, size)))
+		die("Cannot reallocate memory.");
+	return p;
+}
+
 void
 insert_char(char *dst, char c, int len) {
 	memmove(dst + 1, dst, len);
@@ -111,8 +119,7 @@ line_insert_char(Line *line, size_t index, char c) {
 
 	if(newlen > line->cap) {
 		line->cap = line->cap ? line->cap * 2 : 16;
-		if(!(line->buf = realloc(line->buf, line->cap)))
-			die("Cannot reallocate memory.");
+		line->buf = erealloc(line->buf, line->cap);
 	}
 	insert_char(&line->buf[index], c, line->len - index);
 	line->len = newlen;
@@ -150,8 +157,7 @@ buffer_insert_line(Buffer *b, int index, Line *line) {
 	assert(index >= 0 && index <= b->lines_tot);
 	if(b->lines_tot >= b->lines_cap) {
 		b->lines_cap = b->lines_cap ? b->lines_cap * 2 : 64;
-		if(!(b->lines = realloc(b->lines, sizeof(Line *) * b->lines_cap)))
-			die("realloc:");
+		b->lines = erealloc(b->lines, sizeof(Line *) * b->lines_cap);
 	}
 	if(nb)
 		memmove(b->lines + index + 1, b->lines + index, nb);

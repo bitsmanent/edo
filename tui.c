@@ -27,6 +27,7 @@ struct winsize ws;
 Abuf frame;
 
 extern void *ecalloc(size_t nmemb, size_t size);
+extern void *erealloc(void *p, size_t size);
 extern void die(const char *fmt, ...);
 
 /* function declarations */
@@ -64,9 +65,7 @@ ab_ensure_cap(Abuf *ab, size_t addlen) {
 		return;
 	while(newlen > ab->cap)
 		ab->cap = ab->cap ? ab->cap * 2 : 8;
-	/* TODO: panic and save the dump the data before exit */
-	if(!(ab->buf = realloc(ab->buf, ab->cap)))
-		die("Cannot reallocate memory.");
+	ab->buf = erealloc(ab->buf, ab->cap);
 }
 
 void
