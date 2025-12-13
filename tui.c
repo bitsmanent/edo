@@ -29,6 +29,7 @@ Abuf frame;
 extern void *ecalloc(size_t nmemb, size_t size);
 extern void *erealloc(void *p, size_t size);
 extern void die(const char *fmt, ...);
+extern char *cell_get_text(Cell *cell, char *pool_base);
 
 /* function declarations */
 void ab_free(Abuf *ab);
@@ -43,6 +44,7 @@ void tui_get_window_size(int *rows, int *cols);
 void tui_exit(void);
 void tui_move_cursor(int x, int y);
 void tui_draw_line(int c, int r, char *txt, int len);
+void tui_draw_line_from_cells(UI *ui, int x, int y, Cell *cells, int screen_cols);
 void tui_draw_symbol(int r, int c, Symbol sym);
 void tui_init(void);
 
@@ -150,12 +152,28 @@ tui_get_window_size(int *rows, int *cols) {
 void
 tui_exit(void) {
 	tcsetattr(0, TCSANOW, &origti);
+	printf(CURPOS CLEARRIGHT, ws.ws_row, 0);
 }
 
 void
 tui_move_cursor(int c, int r) {
 	int x = c + 1, y = r + 1; /* TERM coords are 1-based */
 	ab_printf(&frame, CURPOS, y, x);
+}
+
+void tui_draw_line_from_cells(UI *ui, int x, int y, Cell *cells, int count) {
+	assert(x < ws.ws_col && y < ws.ws_row);
+	int w = 0, i;
+	char *txt;
+
+	tui_move_cursor(x, y);
+	for(i = 0; i < count; i++) {
+		w += cells[i].width;
+		txt = cell_get_text(&cells[i], ui->pool.data);
+		ab_write(&frame, txt, cells[i].len);
+		if(w >= ws.ws_col) break;
+	}
+	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
 
 void
@@ -255,6 +273,7 @@ UI ui_tui = {
 	.text_index_at = tui_text_index_at,
 	.move_cursor = tui_move_cursor,
 	.draw_line = tui_draw_line,
+	.draw_line_from_cells = tui_draw_line_from_cells,
 	.draw_symbol = tui_draw_symbol,
 	.get_window_size = tui_get_window_size,
 	.next_event = tui_next_event

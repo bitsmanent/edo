@@ -1,6 +1,10 @@
 /* osaentuhaosenuhaoesnuthaoesnutha oesnthaoesuntha snethu asoenhu saoenhtuaoesn uthaoesunthaoesuntaoeh usaoneth asoenth aoesnth aoesnthaoseuthaoseuthaoesunthaoeusnh asoentuh */
+
+/* 👩‍❤️‍💋‍👩 */
+
 #include <assert.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,7 +69,11 @@ void view_cursor_down(View *v);
 int view_idx2col(View *v, Line *line, int idx);
 int view_col2idx(View *v, Line *line, int col);
 void view_scroll_fix(View *v);
+char *cell_get_text(Cell *cell, char *pool_base);
+void view_place_cursor(View *v);
 void draw_view(View *v);
+void textpool_ensure_cap(TextPool *pool, int len);
+int textpool_insert(TextPool *pool, char *s, int len);
 
 /* function implementations */
 void
@@ -116,7 +124,6 @@ line_insert_char(Line *line, size_t index, char c) {
 	size_t newlen = line->len + 1;
 
 	assert(index >= 0 && index <= line->len);
-
 	if(newlen > line->cap) {
 		line->cap = line->cap ? line->cap * 2 : 16;
 		line->buf = erealloc(line->buf, line->cap);
@@ -309,6 +316,7 @@ view_cursor_down(View *v) {
 int
 view_idx2col(View *v, Line *line, int idx) {
 	(void)v;
+	if(!line->len) return 0;
 	return ui->text_width(line->buf, idx);
 }
 
@@ -333,8 +341,89 @@ view_scroll_fix(View *v) {
 		v->col_offset = v->col_num - v->screen_cols + 1;
 }
 
+/*
+ * TODO
+ *
+ * - arena pool
+ * - fine clipping
+ * - horizontal scroll
+ */
 void
-draw_view(View *v) {
+render(Cell *cells, char *buf, int buflen, int xoff, int cols) {
+	int vx = 0, len, w, i;
+
+	for(i = 0; i < buflen && vx < cols; i++, vx += w) {
+		if(buf[i] == '\t') {
+			/* Note: assume tabstop (8) is <= CELL_POOL_THRESHOLD */
+			w = 8 - (vx % 8);
+			len = w;
+			for(int j = 0; j < w; j++)
+				cells[i].data.text[j] = ' ';
+		}
+		else {
+			w = 1;
+			len = 1;
+			cells[i].data.text[0] = buf[i];
+		}
+
+		cells[i].len = len;
+		cells[i].width = w;
+
+		//cells[i].data.pool_idx = 0;
+		/*
+		char text[CELL_POOL_THRESHOLD];
+		uint32_t pool_idx;
+		*/
+	}
+}
+
+/* TODO: is this the cleaner way to do it? */
+void
+view_place_cursor(View *v) {
+	Line *l;
+	int x, y;
+
+	x = v->col_offset;
+	l = buffer_get_line(v->buf, v->line_num);
+	if(l) {
+		x = view_idx2col(v, l, v->col_num);
+		x -= v->col_offset;
+		y = v->line_num - v->row_offset;
+	} else {
+		x = y = 0;
+	}
+	ui->move_cursor(x, y);
+}
+
+void
+draw_view_with_cells(View *v) {
+	Line *l;
+	int row, y;
+
+	ui->frame_start();
+	view_scroll_fix(v);
+
+	Cell *cells = ecalloc(1, sizeof(Cell) * v->screen_cols);
+
+	for(y = 0; y < v->screen_rows; y++) {
+		row = v->row_offset + y;
+		l = buffer_get_line(v->buf, row);
+		if(!l) {
+			ui->draw_symbol(0, y, SYM_EMPTYLINE);
+			continue;
+		}
+		render(cells, l->buf, l->len, v->col_offset, v->screen_cols);
+		ui->draw_line_from_cells(ui, 0, y, cells, l->len > v->screen_cols ? v->screen_cols : l->len);
+	}
+
+	free(cells);
+
+	view_place_cursor(v);
+	ui->frame_flush();
+}
+
+void
+draw_view_old(View *v) {
 	Line *l;
 	int row, len, y;
 	int idx, sx, shift;
@@ -365,17 +454,41 @@ draw_view(View *v) {
 		ui->draw_line(shift, y, l->buf + idx, len);
 	}
 
-	l = buffer_get_line(v->buf, v->line_num);
-	if(l) {
-		row = view_idx2col(v, l, v->col_num);
-		row -= v->col_offset;
-		y = v->line_num - v->row_offset;
-	} else {
-		row = y = 0;
-	}
-
-	ui->move_cursor(row, y);
+	view_place_cursor(v);
 	ui->frame_flush();
+}
+
+void
+draw_view(View *v) {
+	draw_view_with_cells(v);
+	//draw_view_old(v);
+}
+
+void
+textpool_ensure_cap(TextPool *pool, int len) {
+	size_t newlen = pool->len + len;
+
+	if(newlen <= pool->cap) return;
+	pool->cap *= 2;
+	if(pool->cap < newlen) pool->cap = newlen + 1024;
+	pool->data = erealloc(pool->data, pool->cap);
+}
+
+int
+textpool_insert(TextPool *pool, char *s, int len) {
+	int olen = len;
+
+	textpool_ensure_cap(pool, len);
+	memcpy(pool->data + pool->len, s, len);
+	pool->len += len;
+	return olen;
+}
+
+char *
+cell_get_text(Cell *c, char *pool_base) {
+	if(c->len > CELL_POOL_THRESHOLD)
+		return pool_base + c->data.pool_idx;
+	return c->data.text;
 }
 
 void
@@ -393,9 +506,14 @@ run(void) {
 			else if(ev.key == 'q') running = 0;
 			else if(ev.key == 'K') {
 				Line *l = line_create(NULL);
-				buffer_insert_line(vcur->buf, vcur->line_num + 0, l);
+				buffer_insert_line(vcur->buf, vcur->line_num, l);
+
+				/* we should call view_cursor_hfix() here since we're moving into
+				 * another line (the new one). Since only col_num may be wrong we
+				 * can avoid a function call by setting it manually. */
+				vcur->col_num = 0;
 			}
-			else if(ev.key == 'J') {
+			else if(ev.key == 'J' || ev.key == '\n') {
 				Line *l = line_create(NULL);
 				buffer_insert_line(vcur->buf, vcur->line_num + 1, l);
 				view_cursor_down(vcur);
@@ -419,7 +537,6 @@ main(int argc, char *argv[]) {
 	if(argc == 2) fn = argv[1];
 
 	ui = &ui_tui; /* the one and only... */
-
 	ui->init();
 	Buffer *b = buffer_create(fn);
 	View *v = view_create(b);
@@ -429,5 +546,6 @@ main(int argc, char *argv[]) {
 	buffer_destroy(v->buf);
 	view_destroy(v);
 	ui->exit();
+	free(ui->pool.data);
 	return 0;
 }
