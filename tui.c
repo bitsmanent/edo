@@ -39,7 +39,7 @@ int ab_printf(Abuf *ab, const char *fmt, ...);
 void ab_flush(Abuf *ab);
 void tui_frame_start(void);
 void tui_frame_flush(void);
-int tui_text_width(char *s, int len);
+int tui_text_width(char *s, int len, int x);
 void tui_get_window_size(int *rows, int *cols);
 void tui_exit(void);
 void tui_move_cursor(int x, int y);
@@ -115,32 +115,18 @@ tui_frame_flush(void) {
 }
 
 int
-tui_text_width(char *s, int len) {
+tui_text_width(char *s, int len, int x) {
 	int tabstop = 8;
 	int w = 0, i;
 
 	for(i = 0; i < len; i++) {
 		if(s[i] == '\t')
-			w += tabstop - w % tabstop;
+			w += tabstop - x % tabstop;
 		else
 			++w;
+		x += w;
 	}
 	return w;
-}
-
-int
-tui_text_index_at(char *str, int target_x) {
-	int tabstop = 8;
-	int x = 0, i = 0, w;
-
-	while(str[i]) {
-		w = (str[i] == '\t') ? tabstop : 1;
-		if (x + w > target_x)
-			return i;
-		x += w;
-		i++;
-	}
-	return i;
 }
 
 void
@@ -170,8 +156,12 @@ void tui_draw_line_from_cells(UI *ui, int x, int y, Cell *cells, int count) {
 	for(i = 0; i < count; i++) {
 		w += cells[i].width;
 		txt = cell_get_text(&cells[i], ui->pool.data);
-		ab_write(&frame, txt, cells[i].len);
-		if(w >= ws.ws_col) break;
+
+		/* TODO: temp code for testing, we'll se how to deal with this later */
+		if(txt[0] == '\t')
+			ab_printf(&frame, "%*s", cells[i].width, " ");
+		else
+			ab_write(&frame, txt, cells[i].len);
 	}
 	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
@@ -270,7 +260,6 @@ UI ui_tui = {
 	.frame_start = tui_frame_start,
 	.frame_flush = tui_frame_flush,
 	.text_width = tui_text_width,
-	.text_index_at = tui_text_index_at,
 	.move_cursor = tui_move_cursor,
 	.draw_line = tui_draw_line,
 	.draw_line_from_cells = tui_draw_line_from_cells,

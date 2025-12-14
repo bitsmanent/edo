@@ -67,8 +67,9 @@ void view_cursor_right(View *v);
 void view_cursor_up(View *v);
 void view_cursor_down(View *v);
 int view_idx2col(View *v, Line *line, int idx);
-int view_col2idx(View *v, Line *line, int col);
 void view_scroll_fix(View *v);
+int measure_span(char *s, int len, int start_x);
+int render(Cell *cells, char *buf, int buflen, int xoff, int cols);
 char *cell_get_text(Cell *cell, char *pool_base);
 void view_place_cursor(View *v);
 void draw_view(View *v);
@@ -317,13 +318,7 @@ int
 view_idx2col(View *v, Line *line, int idx) {
 	(void)v;
 	if(!line->len) return 0;
-	return ui->text_width(line->buf, idx);
-}
-
-int
-view_col2idx(View *v, Line *line, int col) {
-	(void)v;
-	return ui->text_index_at(line->buf, col);
+	return measure_span(line->buf, idx, 0);
 }
 
 void
@@ -335,46 +330,61 @@ view_scroll_fix(View *v) {
 		v->row_offset = v->line_num - v->screen_rows + 1;
 
 	/* horizontal */
-	if(v->col_num < v->col_offset)
-		v->col_offset = v->col_num;
-	if(v->col_num >= v->col_offset + v->screen_cols)
-		v->col_offset = v->col_num - v->screen_cols + 1;
+	Line *l = buffer_get_line(v->buf, v->line_num);
+	int vx = view_idx2col(v, l, v->col_num);
+
+	if(vx < v->col_offset)
+		v->col_offset = vx;
+	if(vx >= v->col_offset + v->screen_cols)
+		v->col_offset = vx - v->screen_cols + 1;
 }
 
-/*
- * TODO
- *
- * - arena pool
- * - fine clipping
- * - horizontal scroll
- */
-void
-render(Cell *cells, char *buf, int buflen, int xoff, int cols) {
-	int vx = 0, len, w, i;
+int
+measure_span(char *s, int slen, int start_x) {
+	int x = start_x;
+	int len, i;
 
-	for(i = 0; i < buflen && vx < cols; i++, vx += w) {
-		if(buf[i] == '\t') {
-			/* Note: assume tabstop (8) is <= CELL_POOL_THRESHOLD */
-			w = 8 - (vx % 8);
-			len = w;
-			for(int j = 0; j < w; j++)
-				cells[i].data.text[j] = ' ';
+	for(i = 0; i < slen; i += len) {
+		len = 1; /* TODO: decode UTF8 */
+		x += ui->text_width(s + i, len, x);
+	}
+	return x - start_x;
+}
+
+int
+render(Cell *cells, char *buf, int buflen, int xoff, int cols) {
+	int nc = 0, vx = 0, i = 0;
+	int w, len, x;
+
+	while(i < buflen) {
+		len = 1; /* TODO: decode UTF8 */
+		w = ui->text_width(buf + i, len, vx);
+
+		if(vx + w <= xoff) goto next; /* horizontal scroll */
+
+		x = vx - xoff;
+		if(x >= cols) break; /* screen has been filled */
+		if(x + w > cols) break; /* truncated character (TODO: draw a symbol?) */
+
+		if(len > CELL_POOL_THRESHOLD) {
+			/* TODO: manage pool */
+			die("Arena pool to be implemented.\n");
 		}
 		else {
-			w = 1;
-			len = 1;
-			cells[i].data.text[0] = buf[i];
+			memcpy(cells[nc].data.text, buf + i, len);
 		}
 
-		cells[i].len = len;
-		cells[i].width = w;
+		cells[nc].len = len;
+		cells[nc].width = w;
+		if(vx < xoff) cells[nc].width -= xoff - vx; /* partial rendering */
 
-		//cells[i].data.pool_idx = 0;
-		/*
-		char text[CELL_POOL_THRESHOLD];
-		uint32_t pool_idx;
-		*/
+		++nc;
+next:
+		vx += w;
+		i += len;
 	}
+
+	return nc;
 }
 
 /* TODO: is this the cleaner way to do it? */
@@ -396,9 +406,9 @@ view_place_cursor(View *v) {
 }
 
 void
-draw_view_with_cells(View *v) {
+draw_view(View *v) {
 	Line *l;
-	int row, y;
+	int row, y, nc;
 
 	ui->frame_start();
 	view_scroll_fix(v);
@@ -412,56 +422,14 @@ draw_view_with_cells(View *v) {
 			ui->draw_symbol(0, y, SYM_EMPTYLINE);
 			continue;
 		}
-		render(cells, l->buf, l->len, v->col_offset, v->screen_cols);
-		ui->draw_line_from_cells(ui, 0, y, cells, l->len > v->screen_cols ? v->screen_cols : l->len);
+		nc = render(cells, l->buf, l->len, v->col_offset, v->screen_cols);
+		ui->draw_line_from_cells(ui, 0, y, cells, nc);
 	}
 
 	free(cells);
 
 	view_place_cursor(v);
 	ui->frame_flush();
-}
-
-void
-draw_view_old(View *v) {
-	Line *l;
-	int row, len, y;
-	int idx, sx, shift;
-
-	ui->frame_start();
-	view_scroll_fix(v);
-
-	for(y = 0; y < v->screen_rows; y++) {
-		row = v->row_offset + y;
-
-		if(row >= v->buf->lines_tot) {
-			ui->draw_symbol(0, y, SYM_EMPTYLINE);
-			continue;
-		}
-
-		l = buffer_get_line(v->buf, row);
-		if(!l->len) {
-			ui->draw_line(0, y, "", 0);
-			continue;
-		}
-		idx = view_col2idx(v, l, v->col_offset);
-		len = l->len - idx;
-
-		/* fine clipping */
-		sx = view_idx2col(v, l, idx);
-		shift = sx - v->col_offset;
-
-		ui->draw_line(shift, y, l->buf + idx, len);
-	}
-
-	view_place_cursor(v);
-	ui->frame_flush();
-}
-
-void
-draw_view(View *v) {
-	draw_view_with_cells(v);
-	//draw_view_old(v);
 }
 
 void
