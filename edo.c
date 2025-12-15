@@ -505,6 +505,7 @@ main(int argc, char *argv[]) {
 	if(argc == 2) fn = argv[1];
 
 	ui = &ui_tui; /* the one and only... */
+	atexit(ui->exit);
 	ui->init();
 	Buffer *b = buffer_create(fn);
 	View *v = view_create(b);
