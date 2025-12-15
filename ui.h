@@ -58,8 +58,7 @@ struct UI {
 	void (*frame_flush)(void);
 	int (*text_width)(char *s, int len, int x);
 	void (*move_cursor)(int x, int y);
-	void (*draw_line)(int r, int c, char *txt, int len);
-	void (*draw_line_from_cells)(UI *ui, int x, int y, Cell *cells, int count);
+	void (*draw_line)(UI *ui, int x, int y, Cell *cells, int count);
 	void (*draw_symbol)(int r, int c, Symbol sym);
 	void (*get_window_size)(int *rows, int *cols);
 	Event (*next_event)(void);

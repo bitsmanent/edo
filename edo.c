@@ -423,7 +423,7 @@ draw_view(View *v) {
 			continue;
 		}
 		nc = render(cells, l->buf, l->len, v->col_offset, v->screen_cols);
-		ui->draw_line_from_cells(ui, 0, y, cells, nc);
+		ui->draw_line(ui, 0, y, cells, nc);
 	}
 
 	free(cells);

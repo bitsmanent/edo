@@ -43,8 +43,7 @@ int tui_text_width(char *s, int len, int x);
 void tui_get_window_size(int *rows, int *cols);
 void tui_exit(void);
 void tui_move_cursor(int x, int y);
-void tui_draw_line(int c, int r, char *txt, int len);
-void tui_draw_line_from_cells(UI *ui, int x, int y, Cell *cells, int screen_cols);
+void tui_draw_line(UI *ui, int x, int y, Cell *cells, int screen_cols);
 void tui_draw_symbol(int r, int c, Symbol sym);
 void tui_init(void);
 
@@ -147,7 +146,8 @@ tui_move_cursor(int c, int r) {
 	ab_printf(&frame, CURPOS, y, x);
 }
 
-void tui_draw_line_from_cells(UI *ui, int x, int y, Cell *cells, int count) {
+void
+tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
 	assert(x < ws.ws_col && y < ws.ws_row);
 	int w = 0, i;
 	char *txt;
@@ -162,41 +162,6 @@ void tui_draw_line_from_cells(UI *ui, int x, int y, Cell *cells, int count) {
 			ab_printf(&frame, "%*s", cells[i].width, " ");
 		else
 			ab_write(&frame, txt, cells[i].len);
-	}
-	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
-}
-
-void
-tui_draw_line(int c, int r, char *txt, int len) {
-	if(c >= ws.ws_col || r >= ws.ws_row) return;
-
-	int x = c;
-	int tabstop = 8;
-	int i = 0;
-	int cw, clen;
-
-	tui_move_cursor(x < 0 ? 0 : x, r);
-	while(i < len) {
-		cw = (txt[i] == '\t' ? tabstop : 1);
-
-		if(x + cw <= 0)
-			continue;
-
-		if(txt[i] == '\t') {
-			int spaces = tabstop;
-			clen = 1;
-
-			if(x < 0) spaces += x;
-			if(x + cw > ws.ws_col) spaces -= (x + cw - ws.ws_col);
-			while(spaces--) ab_write(&frame, " ", 1);
-		} else {
-			if(x + cw > ws.ws_col) break;
-			clen = 1;
-			ab_write(&frame, txt + i, clen);
-		}
-
-		x += cw;
-		i += clen;
 	}
 	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
@@ -262,7 +227,6 @@ UI ui_tui = {
 	.text_width = tui_text_width,
 	.move_cursor = tui_move_cursor,
 	.draw_line = tui_draw_line,
-	.draw_line_from_cells = tui_draw_line_from_cells,
 	.draw_symbol = tui_draw_symbol,
 	.get_window_size = tui_get_window_size,
 	.next_event = tui_next_event
