@@ -33,17 +33,6 @@ typedef struct {
 		char text[CELL_POOL_THRESHOLD];
 		uint32_t pool_idx;
 	} data;
-	/*
-	 * For smarter backend we can also provide this fields:
-	 *
-	 * idx: index of the bytes into the file buffer
-	 * type: char, tab, newline, eof, ecc.
-	 *
-	 * So the backend may say for example "Oh, it's a tab. Let's ignore the
-	 * rendered cells with spaces and use an beatuful icon instead."
-	 *
-	 * We should also add the style here.
-	*/
 	uint16_t len;
 	uint16_t width;
 } Cell;

@@ -230,10 +230,10 @@ buffer_create(char *fn) {
 		if(buffer_load_file(b))
 			printf("%s: cannot load file\n", fn);
 	}
-	else {
-		/* ensure we have at least a line */
-		buffer_insert_line(b, b->lines_tot, line_create(NULL));
-	}
+
+	/* ensure we have at least a line */
+	if(!b->lines_tot) buffer_insert_line(b, 0, line_create(NULL));
+
 	return b;
 }
 
