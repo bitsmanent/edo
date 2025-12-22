@@ -275,19 +275,6 @@ view_destroy(View *v) {
 	free(v);
 }
 
-/* actual invariant for the cursor */
-void
-_view_cursor_hfix(View *v) {
-	assert(v->line_num >= 0 && v->line_num< v->buf->lines_tot);
-
-	Line *l = v->buf->lines[v->line_num];
-
-	if(v->col_num < 0)
-		v->col_num = 0;
-	else if(v->col_num > l->len)
-		v->col_num = l->len;
-}
-
 void
 view_cursor_fix(View *v) {
 	/* Note: if called together then vfix must always be called first */
@@ -295,6 +282,7 @@ view_cursor_fix(View *v) {
 	view_cursor_hfix(v);
 }
 
+/* actual invariant for the cursor */
 void
 view_cursor_hfix(View *v) {
 	Line *l = v->buf->lines[v->line_num];
