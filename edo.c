@@ -61,6 +61,7 @@ Buffer *buffer_create(char *fn);
 void buffer_destroy(Buffer *b);
 View *view_create(Buffer *b);
 void view_destroy(View *v);
+void view_cursor_fix(View *v);
 void view_cursor_hfix(View *v);
 void view_cursor_vfix(View *v);
 void view_cursor_left(View *v);
@@ -288,6 +289,13 @@ _view_cursor_hfix(View *v) {
 }
 
 void
+view_cursor_fix(View *v) {
+	/* Note: if called together then vfix must always be called first */
+	view_cursor_vfix(v);
+	view_cursor_hfix(v);
+}
+
+void
 view_cursor_hfix(View *v) {
 	Line *l = v->buf->lines[v->line_num];
 
@@ -493,16 +501,7 @@ run(void) {
 			else if(ev.key == 'q') running = 0;
 			else if(ev.key == 'D') {
 				buffer_delete_line(vcur->buf, vcur->line_num, 1);
-
-				/* TODO: when called together vfix must
-				 * *always* be called first.  We better join
-				 * their code into an ad-hoc function which is
-				 * called after each change to the buffer.
-				 * Otherwise we can call them separately but
-				 * provide a view_cursor_fix() which call them
-				 * both in the right order. */
-				view_cursor_vfix(vcur);
-				view_cursor_hfix(vcur);
+				view_cursor_fix(vcur);
 			} else if(ev.key == 'K') {
 				Line *l = line_create(NULL);
 				buffer_insert_line(vcur->buf, vcur->line_num, l);
