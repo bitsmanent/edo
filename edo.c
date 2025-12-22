@@ -47,9 +47,9 @@ UI *ui;
 void die(const char *fmt, ...);
 void *ecalloc(size_t nmemb, size_t size);
 void *erealloc(void *p, size_t size);
-void insert_char(char *dst, char c, int len);
+void insert_data(char *dst, char *txt, int txtlen, int len);
 void delete_char(char *dst, int count, int len);
-void line_insert_char(Line *line, size_t index, char c);
+void line_insert_text(Line *line, size_t index, char *txt, int len);
 void line_delete_char(Line *line, int index, int count);
 Line *line_create(char *content);
 void line_destroy(Line *l);
@@ -112,9 +112,9 @@ erealloc(void *p, size_t size) {
 }
 
 void
-insert_char(char *dst, char c, int len) {
-	memmove(dst + 1, dst, len);
-	memcpy(dst, &c, 1);
+insert_data(char *dst, char *txt, int txtlen, int len) {
+	memmove(dst + txtlen, dst, len);
+	memcpy(dst, txt, txtlen);
 }
 
 void
@@ -123,15 +123,15 @@ delete_char(char *dst, int count, int len) {
 }
 
 void
-line_insert_char(Line *line, size_t index, char c) {
-	size_t newlen = line->len + 1;
+line_insert_text(Line *line, size_t index, char *txt, int len) {
+	size_t newlen = line->len + len;
 
 	assert(index >= 0 && index <= line->len);
 	if(newlen > line->cap) {
 		line->cap = line->cap ? line->cap * 2 : 16;
 		line->buf = erealloc(line->buf, line->cap);
 	}
-	insert_char(&line->buf[index], c, line->len - index);
+	insert_data(&line->buf[index], txt, len, line->len - index);
 	line->len = newlen;
 }
 
@@ -504,8 +504,9 @@ run(void) {
 				buffer_insert_line(vcur->buf, vcur->line_num + 1, l);
 				view_cursor_down(vcur);
 			} else {
-				line_insert_char(vcur->buf->lines[vcur->line_num], vcur->col_num, ev.key);
-				view_cursor_right(vcur);
+				/* TODO: view_insert_text()? */
+				line_insert_text(vcur->buf->lines[vcur->line_num], vcur->col_num, (char *)&ev.key, 1);
+				vcur->col_num += 1;
 			}
 			break;
 		case EV_UKN:

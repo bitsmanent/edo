@@ -198,7 +198,7 @@ int
 tui_read_byte(void) {
 	char c;
 
-	if (read(STDIN_FILENO, &c, 1) == 1)
+	if(read(STDIN_FILENO, &c, 1) == 1)
 		return c;
 	return -1;
 }
