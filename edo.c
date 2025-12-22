@@ -62,6 +62,7 @@ void buffer_destroy(Buffer *b);
 View *view_create(Buffer *b);
 void view_destroy(View *v);
 void view_cursor_hfix(View *v);
+void view_cursor_vfix(View *v);
 void view_cursor_left(View *v);
 void view_cursor_right(View *v);
 void view_cursor_up(View *v);
@@ -175,18 +176,21 @@ buffer_insert_line(Buffer *b, int index, Line *line) {
 
 void
 buffer_delete_line(Buffer *b, int index, int count) {
-	int lines_remaining, nb;
-	int last = index + count;
-	int i;
+	if(index < 0 || index >= b->lines_tot) return;
+	if(index + count > b->lines_tot) count = b->lines_tot - index;
 
-	assert(count && index < b->lines_tot && last <= b->lines_tot);
-	for(i = 0; i < count; i++)
-		line_destroy(b->lines[index + i]);
-	lines_remaining = b->lines_tot - last;
-	if(lines_remaining) {
-		nb = lines_remaining * sizeof(Line *);
-		memmove(b->lines + index, b->lines + last, nb);
+	/* do not remove the only existing line (but clear it) */
+	if(b->lines_tot == 1 && !index) {
+		b->lines[0]->len = 0;
+		return;
 	}
+
+	for (int i = 0; i < count; i++)
+		line_destroy(b->lines[index + i]);
+
+	int remaining = b->lines_tot - (index + count);
+	if (remaining > 0)
+		memmove(b->lines + index, b->lines + index + count, remaining * sizeof(Line *));
 	b->lines_tot -= count;
 }
 
@@ -201,7 +205,7 @@ buffer_load_file(Buffer *b) {
 	if(!(fp = fopen(b->file_name, "r")))
 		return -1;
 	while((len = getline(&buf, &cap, fp)) != -1) {
-		buf[len - 1] = 0;
+		if(len && buf[len-1] == '\n') buf[len - 1] = 0;
 		b->file_size += len;
 		l = line_create(buf);
 		buffer_insert_line(b, b->lines_tot, l);
@@ -212,7 +216,7 @@ buffer_load_file(Buffer *b) {
 
 Line *
 buffer_get_line(Buffer *b, int index) {
-	if(!b->lines)
+	if(index < 0 || index >= b->lines_tot)
 		return NULL;
 	return b->lines[index];
 }
@@ -272,16 +276,31 @@ view_destroy(View *v) {
 
 /* actual invariant for the cursor */
 void
-view_cursor_hfix(View *v) {
+_view_cursor_hfix(View *v) {
 	assert(v->line_num >= 0 && v->line_num< v->buf->lines_tot);
 
 	Line *l = v->buf->lines[v->line_num];
 
-	/* TODO: < 0 needed? */
 	if(v->col_num < 0)
 		v->col_num = 0;
 	else if(v->col_num > l->len)
 		v->col_num = l->len;
+}
+
+void
+view_cursor_hfix(View *v) {
+	Line *l = v->buf->lines[v->line_num];
+	if (v->col_num < 0) v->col_num = 0;
+	if (v->col_num > l->len) v->col_num = l->len;
+}
+
+void
+view_cursor_vfix(View *v) {
+	if (v->line_num >= v->buf->lines_tot)
+		v->line_num = v->buf->lines_tot - 1;
+
+	if (v->line_num < 0)
+		v->line_num = 0;
 }
 
 void
@@ -472,7 +491,12 @@ run(void) {
 			else if(ev.key == 'h') view_cursor_left(vcur);
 			else if(ev.key == 'l') view_cursor_right(vcur);
 			else if(ev.key == 'q') running = 0;
-			else if(ev.key == 'K') {
+			else if(ev.key == 'D') {
+				buffer_delete_line(vcur->buf, vcur->line_num, 1);
+				view_cursor_hfix(vcur);
+				view_cursor_vfix(vcur);
+				view_scroll_fix(vcur);
+			} else if(ev.key == 'K') {
 				Line *l = line_create(NULL);
 				buffer_insert_line(vcur->buf, vcur->line_num, l);
 
