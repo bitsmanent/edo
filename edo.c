@@ -290,6 +290,7 @@ _view_cursor_hfix(View *v) {
 void
 view_cursor_hfix(View *v) {
 	Line *l = v->buf->lines[v->line_num];
+
 	if (v->col_num < 0) v->col_num = 0;
 	if (v->col_num > l->len) v->col_num = l->len;
 }
@@ -298,7 +299,6 @@ void
 view_cursor_vfix(View *v) {
 	if (v->line_num >= v->buf->lines_tot)
 		v->line_num = v->buf->lines_tot - 1;
-
 	if (v->line_num < 0)
 		v->line_num = 0;
 }
@@ -493,9 +493,16 @@ run(void) {
 			else if(ev.key == 'q') running = 0;
 			else if(ev.key == 'D') {
 				buffer_delete_line(vcur->buf, vcur->line_num, 1);
-				view_cursor_hfix(vcur);
+
+				/* TODO: when called together vfix must
+				 * *always* be called first.  We better join
+				 * their code into an ad-hoc function which is
+				 * called after each change to the buffer.
+				 * Otherwise we can call them separately but
+				 * provide a view_cursor_fix() which call them
+				 * both in the right order. */
 				view_cursor_vfix(vcur);
-				view_scroll_fix(vcur);
+				view_cursor_hfix(vcur);
 			} else if(ev.key == 'K') {
 				Line *l = line_create(NULL);
 				buffer_insert_line(vcur->buf, vcur->line_num, l);
