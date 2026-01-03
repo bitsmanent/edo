@@ -265,7 +265,7 @@ tui_init(void) {
 
 	/* check for compat mode */
 	/* TODO: auto-detect */
-	compat_mode = 0;
+	compat_mode = 1;
 }
 
 int
