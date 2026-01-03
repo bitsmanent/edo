@@ -1,4 +1,6 @@
-#include "ui.h"
+#define _XOPEN_SOURCE
+#define _BSD_SOURCE
+#include <wchar.h>
 
 #include <assert.h>
 #include <stdarg.h>
@@ -9,6 +11,9 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+
+#include "utf8.h"
+#include "ui.h"
 
 #define CURPOS          "\33[%d;%dH"
 //#define CLEARLEFT       "\33[1K"
@@ -22,10 +27,13 @@ typedef struct {
 	int cap;
 } Abuf;
 
+/* globals */
 struct termios origti;
 struct winsize ws;
 Abuf frame;
+int compat_mode;
 
+/* TODO: edo.h? */
 extern void *ecalloc(size_t nmemb, size_t size);
 extern void *erealloc(void *p, size_t size);
 extern void die(const char *fmt, ...);
@@ -40,6 +48,7 @@ void ab_flush(Abuf *ab);
 void tui_frame_start(void);
 void tui_frame_flush(void);
 int tui_text_width(char *s, int len, int x);
+int tui_text_len(char *s, int len);
 void tui_get_window_size(int *rows, int *cols);
 void tui_exit(void);
 void tui_move_cursor(int x, int y);
@@ -117,15 +126,38 @@ int
 tui_text_width(char *s, int len, int x) {
 	int tabstop = 8;
 	int w = 0, i;
+	int step, wc;
+	unsigned int cp;
 
-	for(i = 0; i < len; i++) {
-		if(s[i] == '\t')
+	for(i = 0; i < len; i += step) {
+		step = utf8_decode(s + i, len - i, &cp);
+		if(cp == '\t') {
 			w += tabstop - x % tabstop;
-		else
-			++w;
-		x += w;
+			continue;
+		}
+		if(compat_mode && cp == 0x200D) {
+			w += 6; // <200d>
+			continue;
+		}
+		wc = wcwidth(cp);
+		if(!compat_mode) {
+			/* force 2 cells width for emoji followed by VS16 */
+			int nxi = i + step;
+			if(nxi < len) {
+				unsigned int nxcp;
+				utf8_decode(s + nxi, len - nxi, &nxcp);
+				if(nxcp == 0xFE0F && ((cp >= 0x203C && cp <= 0x3299) || cp >= 0x1F000))
+					wc = 2;
+			}
+		}
+		if(wc > 0) w += wc;
 	}
 	return w;
+}
+
+int
+tui_text_len(char *s, int len) {
+	return compat_mode ? utf8_len_compat(s, len) : utf8_len(s, len);
 }
 
 void
@@ -149,19 +181,57 @@ tui_move_cursor(int c, int r) {
 void
 tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
 	assert(x < ws.ws_col && y < ws.ws_row);
-	int w = 0, i;
 	char *txt;
+	unsigned int cp = 0;
+	int was_emoji = 0;
+	int i;
 
 	tui_move_cursor(x, y);
 	for(i = 0; i < count; i++) {
-		w += cells[i].width;
-		txt = cell_get_text(&cells[i], ui->pool.data);
+		x += cells[i].width;
+		txt = cell_get_text(cells + i, ui->pool.data);
 
 		/* TODO: temp code for testing, we'll se how to deal with this later */
 		if(txt[0] == '\t')
 			ab_printf(&frame, "%*s", cells[i].width, " ");
-		else
-			ab_write(&frame, txt, cells[i].len);
+		else {
+			if(compat_mode) {
+				int o = 0;
+				while(o < cells[i].len) {
+					int step = utf8_decode(txt + o, cells[i].len - o, &cp);
+
+					if(cp == 0x200D) {
+						ab_write(&frame, "<200d>", cells[i].width);
+					}
+					else {
+						if(was_emoji) {
+							const char t[] = "\x1b[0;48;5;232m";
+							ab_write(&frame, t, sizeof t);
+						}
+						ab_write(&frame, txt + o, step);
+						if(was_emoji) {
+							const char t[] = "\x1b[0m";
+							ab_write(&frame, t, sizeof t);
+						}
+					}
+					o += step;
+
+				}
+			}
+			else
+				ab_write(&frame, txt, cells[i].len);
+		}
+
+		/* Instead of check for 0xFE0F (or detect other problematic emojis) just reposition
+		 * the cursor for any multi-byte grapheme cluster. This may be further optimized in
+		 * the future but for now it's a robust way to solve any eventual incongruences.
+		 * It's important to skip this for "glue" char to avoid breaking sequences which
+		 * must always be adiacent (e.g. regional indicator symbols). */
+		int is_glue = (cp >= 0x1F1E6 && cp <= 0x1F1FF);
+		if(cells[i].len > 1 && !is_glue) tui_move_cursor(x, y);
+
+		if(compat_mode) was_emoji = cells[i].len > 1 && !is_glue;
+
 	}
 	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
@@ -192,6 +262,10 @@ tui_init(void) {
 	tcsetattr(0, TCSAFLUSH, &ti);
 	setbuf(stdout, NULL);
 	ioctl(0, TIOCGWINSZ, &ws);
+
+	/* check for compat mode */
+	/* TODO: auto-detect */
+	compat_mode = 0;
 }
 
 int
@@ -225,6 +299,7 @@ UI ui_tui = {
 	.frame_start = tui_frame_start,
 	.frame_flush = tui_frame_flush,
 	.text_width = tui_text_width,
+	.text_len = tui_text_len,
 	.move_cursor = tui_move_cursor,
 	.draw_line = tui_draw_line,
 	.draw_symbol = tui_draw_symbol,

@@ -1,7 +1,3 @@
-/* osaentuhaosenuhaoesnuthaoesnutha oesnthaoesuntha snethu asoenhu saoenhtuaoesn uthaoesunthaoesuntaoeh usaoneth asoenth aoesnth aoesnthaoseuthaoseuthaoesunthaoeusnh asoentuh */
-
-/* 👩‍❤️‍💋‍👩 */
-
 #include <assert.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -10,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "utf8.h"
 #include "ui.h"
 
 typedef struct {
@@ -29,10 +26,10 @@ typedef struct {
 
 typedef struct {
 	Buffer *buf;
-	int line_num;
-	int col_num;
-	int row_offset;
-	int col_offset;
+	int line_idx;
+	int col_idx;
+	int row_off;
+	int col_off;
 	int screen_rows;
 	int screen_cols;
 	//int pref_col;
@@ -260,10 +257,10 @@ View *
 view_create(Buffer *b) {
 	View *v = ecalloc(1, sizeof(View));
 
-	v->line_num = 0;
-	v->col_num = 0;
-	v->row_offset = 0;
-	v->col_offset = 0;
+	v->line_idx = 0;
+	v->col_idx = 0;
+	v->row_off = 0;
+	v->col_off = 0;
 	v->buf = b;
 
 	ui->get_window_size(&v->screen_rows, &v->screen_cols);
@@ -285,73 +282,85 @@ view_cursor_fix(View *v) {
 /* actual invariant for the cursor */
 void
 view_cursor_hfix(View *v) {
-	Line *l = v->buf->lines[v->line_num];
+	Line *l = v->buf->lines[v->line_idx];
 
-	if (v->col_num < 0) v->col_num = 0;
-	if (v->col_num > l->len) v->col_num = l->len;
+	if (v->col_idx < 0) v->col_idx = 0;
+	if (v->col_idx > l->len) v->col_idx = l->len;
 }
 
 void
 view_cursor_vfix(View *v) {
-	if (v->line_num >= v->buf->lines_tot)
-		v->line_num = v->buf->lines_tot - 1;
-	if (v->line_num < 0)
-		v->line_num = 0;
+	if (v->line_idx >= v->buf->lines_tot)
+		v->line_idx = v->buf->lines_tot - 1;
+	if (v->line_idx < 0)
+		v->line_idx = 0;
 }
 
 void
 view_cursor_left(View *v) {
-	if(v->col_num)
-		--v->col_num;
+	/* TODO: decode UTF-8 */
+	if(v->col_idx)
+		--v->col_idx;
 }
 
 void
 view_cursor_right(View *v) {
-	Line *l = v->buf->lines[v->line_num];
+	Line *l = v->buf->lines[v->line_idx];
 
-	if(v->col_num < l->len)
-		++v->col_num;
+	if(v->col_idx < l->len) {
+		int len = ui->text_len(l->buf + v->col_idx, l->len - v->col_idx);
+		v->col_idx += len;
+	}
 }
 
 void
 view_cursor_up(View *v) {
-	if(v->line_num) {
-		--v->line_num;
+	if(v->line_idx) {
+		--v->line_idx;
 		view_cursor_hfix(v);
 	}
 }
 
 void
 view_cursor_down(View *v) {
-	if(v->line_num < v->buf->lines_tot - 1) {
-		++v->line_num;
+	if(v->line_idx < v->buf->lines_tot - 1) {
+		++v->line_idx;
 		view_cursor_hfix(v);
 	}
 }
 
 int
-view_idx2col(View *v, Line *line, int idx) {
-	(void)v;
-	if(!line->len) return 0;
-	return measure_span(line->buf, idx, 0);
+view_idx2col(View *v, Line *line, int target_idx) {
+	int x = 0;
+	int i = 0;
+	size_t len;
+
+	if (target_idx > line->len) target_idx = line->len;
+
+	while (i < target_idx) {
+		len = ui->text_len(line->buf + i, line->len - i);
+		x += ui->text_width(line->buf + i, len, x);
+		i += len;
+	}
+	return x;
 }
 
 void
 view_scroll_fix(View *v) {
 	/* vertical */
-	if (v->line_num < v->row_offset)
-		v->row_offset = v->line_num;
-	if (v->line_num >= v->row_offset + v->screen_rows)
-		v->row_offset = v->line_num - v->screen_rows + 1;
+	if (v->line_idx < v->row_off)
+		v->row_off = v->line_idx;
+	if (v->line_idx >= v->row_off + v->screen_rows)
+		v->row_off = v->line_idx - v->screen_rows + 1;
 
 	/* horizontal */
-	Line *l = buffer_get_line(v->buf, v->line_num);
-	int vx = view_idx2col(v, l, v->col_num);
+	Line *l = buffer_get_line(v->buf, v->line_idx);
+	int vx = view_idx2col(v, l, v->col_idx);
 
-	if(vx < v->col_offset)
-		v->col_offset = vx;
-	if(vx >= v->col_offset + v->screen_cols)
-		v->col_offset = vx - v->screen_cols + 1;
+	if(vx < v->col_off)
+		v->col_off = vx;
+	if(vx >= v->col_off + v->screen_cols)
+		v->col_off = vx - v->screen_cols + 1;
 }
 
 int
@@ -372,7 +381,7 @@ render(Cell *cells, char *buf, int buflen, int xoff, int cols) {
 	int w, len, x;
 
 	while(i < buflen) {
-		len = 1; /* TODO: decode UTF8 */
+		len = ui->text_len(buf + i, buflen - i);
 		w = ui->text_width(buf + i, len, vx);
 
 		if(vx + w <= xoff) goto next; /* horizontal scroll */
@@ -381,16 +390,15 @@ render(Cell *cells, char *buf, int buflen, int xoff, int cols) {
 		if(x >= cols) break; /* screen has been filled */
 		if(x + w > cols) break; /* truncated character (TODO: draw a symbol?) */
 
-		if(len > CELL_POOL_THRESHOLD) {
-			/* TODO: manage pool */
-			die("Arena pool to be implemented.\n");
-		}
-		else {
+		if(len > CELL_POOL_THRESHOLD)
+			cells[nc].data.pool_idx = textpool_insert(&ui->pool, buf + i, len);
+		else
 			memcpy(cells[nc].data.text, buf + i, len);
-		}
 
 		cells[nc].len = len;
 		cells[nc].width = w;
+
+		/* TODO: handle truncated multi-column characters */
 		if(vx < xoff) cells[nc].width -= xoff - vx; /* partial rendering */
 
 		++nc;
@@ -408,12 +416,12 @@ view_place_cursor(View *v) {
 	Line *l;
 	int x, y;
 
-	x = v->col_offset;
-	l = buffer_get_line(v->buf, v->line_num);
+	x = v->col_off;
+	l = buffer_get_line(v->buf, v->line_idx);
 	if(l) {
-		x = view_idx2col(v, l, v->col_num);
-		x -= v->col_offset;
-		y = v->line_num - v->row_offset;
+		x = view_idx2col(v, l, v->col_idx);
+		x -= v->col_off;
+		y = v->line_idx - v->row_off;
 	} else {
 		x = y = 0;
 	}
@@ -425,19 +433,20 @@ draw_view(View *v) {
 	Line *l;
 	int row, y, nc;
 
+	ui->pool.len = 0;
 	ui->frame_start();
 	view_scroll_fix(v);
 
 	Cell *cells = ecalloc(1, sizeof(Cell) * v->screen_cols);
 
 	for(y = 0; y < v->screen_rows; y++) {
-		row = v->row_offset + y;
+		row = v->row_off + y;
 		l = buffer_get_line(v->buf, row);
 		if(!l) {
 			ui->draw_symbol(0, y, SYM_EMPTYLINE);
 			continue;
 		}
-		nc = render(cells, l->buf, l->len, v->col_offset, v->screen_cols);
+		nc = render(cells, l->buf, l->len, v->col_off, v->screen_cols);
 		ui->draw_line(ui, 0, y, cells, nc);
 	}
 
@@ -459,12 +468,12 @@ textpool_ensure_cap(TextPool *pool, int len) {
 
 int
 textpool_insert(TextPool *pool, char *s, int len) {
-	int olen = len;
+	int idx = pool->len;
 
 	textpool_ensure_cap(pool, len);
 	memcpy(pool->data + pool->len, s, len);
 	pool->len += len;
-	return olen;
+	return idx;
 }
 
 char *
@@ -483,30 +492,40 @@ run(void) {
 		switch(ev.type) {
 		case EV_KEY:
 			if(ev.key == 'k') view_cursor_up(vcur);
+			else if(ev.key == 'p') {
+				Line *l = vcur->buf->lines[vcur->line_idx];
+				fprintf(stderr, "debug current line (%d):\n", vcur->line_idx);
+				fprintf(stderr, "=== START LINE ===\n");
+				for(int i = 0; i < l->len; i++) {
+					if(!(i % 10)) fprintf(stderr, "\n");
+					fprintf(stderr, " 0x%0x", l->buf[i]);
+				}
+				fprintf(stderr, "\n=== END LINE ===");
+			}
 			else if(ev.key == 'j') view_cursor_down(vcur);
 			else if(ev.key == 'h') view_cursor_left(vcur);
 			else if(ev.key == 'l') view_cursor_right(vcur);
 			else if(ev.key == 'q') running = 0;
 			else if(ev.key == 'D') {
-				buffer_delete_line(vcur->buf, vcur->line_num, 1);
+				buffer_delete_line(vcur->buf, vcur->line_idx, 1);
 				view_cursor_fix(vcur);
 			} else if(ev.key == 'K') {
 				Line *l = line_create(NULL);
-				buffer_insert_line(vcur->buf, vcur->line_num, l);
+				buffer_insert_line(vcur->buf, vcur->line_idx, l);
 
 				/* we should call view_cursor_hfix() here since we're moving into
-				 * another line (the new one). Since only col_num may be wrong we
+				 * another line (the new one). Since only col_idx may be wrong we
 				 * can avoid a function call by setting it manually. */
-				vcur->col_num = 0;
+				vcur->col_idx = 0;
 			}
 			else if(ev.key == 'J' || ev.key == '\n') {
 				Line *l = line_create(NULL);
-				buffer_insert_line(vcur->buf, vcur->line_num + 1, l);
+				buffer_insert_line(vcur->buf, vcur->line_idx + 1, l);
 				view_cursor_down(vcur);
 			} else {
 				/* TODO: view_insert_text()? */
-				line_insert_text(vcur->buf->lines[vcur->line_num], vcur->col_num, (char *)&ev.key, 1);
-				vcur->col_num += 1;
+				line_insert_text(vcur->buf->lines[vcur->line_idx], vcur->col_idx, (char *)&ev.key, 1);
+				vcur->col_idx += 1;
 			}
 			break;
 		case EV_UKN:

@@ -3,7 +3,7 @@
 include config.mk
 
 APPNAME=edo
-SRC = ${APPNAME}.c tui.c
+SRC = ${APPNAME}.c tui.c utf8.c
 OBJ = ${SRC:.c=.o}
 
 all: options ${APPNAME}

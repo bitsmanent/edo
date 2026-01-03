@@ -46,6 +46,7 @@ struct UI {
 	void (*frame_start)(void);
 	void (*frame_flush)(void);
 	int (*text_width)(char *s, int len, int x);
+	int (*text_len)(char *s, int len);
 	void (*move_cursor)(int x, int y);
 	void (*draw_line)(UI *ui, int x, int y, Cell *cells, int count);
 	void (*draw_symbol)(int r, int c, Symbol sym);
