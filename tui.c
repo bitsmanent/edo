@@ -20,6 +20,10 @@
 #define CLEARRIGHT      "\33[0K"
 #define CURHIDE         "\33[?25l"
 #define CURSHOW         "\33[?25h"
+#define ERASECHAR       "\33[1X"
+
+#define IS_RIS(c) ((c) >= 0x1F1E6 && (c) <= 0x1F1FF)
+#define IS_AMBI(c) ((c) >= 0x2100 && (c) <= 0x26FF)
 
 typedef struct {
 	char *buf;
@@ -135,21 +139,27 @@ tui_text_width(char *s, int len, int x) {
 			w += tabstop - x % tabstop;
 			continue;
 		}
-		if(compat_mode && cp == 0x200D) {
-			w += 6; // <200d>
-			continue;
-		}
-		wc = wcwidth(cp);
-		if(!compat_mode) {
+
+		wc = -1;
+		if(compat_mode) {
+			if(cp == 0x200D) {
+				w += 6;
+				continue;
+			}
+			if(IS_RIS(cp)) wc = 2;
+		} else {
 			/* force 2 cells width for emoji followed by VS16 */
 			int nxi = i + step;
 			if(nxi < len) {
 				unsigned int nxcp;
 				utf8_decode(s + nxi, len - nxi, &nxcp);
+
 				if(nxcp == 0xFE0F && ((cp >= 0x203C && cp <= 0x3299) || cp >= 0x1F000))
 					wc = 2;
 			}
 		}
+
+		if(wc == -1) wc = wcwidth(cp);
 		if(wc > 0) w += wc;
 	}
 	return w;
@@ -179,12 +189,92 @@ tui_move_cursor(int c, int r) {
 }
 
 void
-tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
-	assert(x < ws.ws_col && y < ws.ws_row);
+tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 	char *txt;
 	unsigned int cp = 0;
 	int was_emoji = 0;
+	int was_ambi = 0;
 	int i;
+
+	tui_move_cursor(x, y);
+	for(i = 0; i < count; i++) {
+		x += cells[i].width;
+		txt = cell_get_text(cells + i, ui->pool.data);
+
+		int cw = cells[i].width;
+
+		/* TODO: temp code for testing, we'll se how to deal with this later */
+		if(txt[0] == '\t') {
+			ab_printf(&frame, "%*s", cells[i].width, " ");
+		} else {
+			int o = 0;
+
+			while(o < cells[i].len) {
+				int step = utf8_decode(txt + o, cells[i].len - o, &cp);
+
+				if(cp == 0x200D) {
+					ab_write(&frame, "<200d>", cells[i].width);
+				} else {
+					int w = wcwidth(cp);
+					if(w > 0) cw = w;
+
+					if(was_emoji) {
+						if(was_ambi && i == count - 1) {
+							const char t2[] = "\x1b[48;5;1m";
+							ab_write(&frame, t2, sizeof t2 - 1);
+						} else {
+							const char t[] = "\x1b[48;5;232m";
+							ab_write(&frame, t, sizeof t - 1);
+
+							/* clear eventual garbage state */
+							ab_write(&frame, ERASECHAR, strlen(ERASECHAR));
+						}
+					}
+
+					ab_write(&frame, txt + o, step);
+
+					if(was_emoji) {
+						const char t[] = "\x1b[0m";
+						ab_write(&frame, t, sizeof t - 1);
+					}
+				}
+				o += step;
+			}
+		}
+
+		/* pad if needed */
+		if(cw < cells[i].width) {
+			tui_move_cursor(x - cells[i].width + cw, y);
+
+			const char t[] = "\x1b[48;5;233m";
+			ab_write(&frame, t, sizeof t - 1);
+
+			while(cw++ < cells[i].width) ab_write(&frame, " ", 1);
+
+			const char t2[] = "\x1b[0m";
+			ab_write(&frame, t2, sizeof t2 - 1);
+		}
+
+		was_emoji = cells[i].len > 1 || IS_RIS(cp);
+		if(was_emoji) tui_move_cursor(x, y);
+		was_ambi = IS_AMBI(cp);
+	}
+	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
+}
+
+
+void
+tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
+	assert(x < ws.ws_col && y < ws.ws_row);
+
+	if(compat_mode) {
+		tui_draw_line_compat(ui, x, y, cells, count);
+		return;
+	}
+
+	char *txt;
+	unsigned int cp;
+	int was_ambi = 0, i;
 
 	tui_move_cursor(x, y);
 	for(i = 0; i < count; i++) {
@@ -195,43 +285,18 @@ tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
 		if(txt[0] == '\t')
 			ab_printf(&frame, "%*s", cells[i].width, " ");
 		else {
-			if(compat_mode) {
-				int o = 0;
-				while(o < cells[i].len) {
-					int step = utf8_decode(txt + o, cells[i].len - o, &cp);
-
-					if(cp == 0x200D) {
-						ab_write(&frame, "<200d>", cells[i].width);
-					}
-					else {
-						if(was_emoji) {
-							const char t[] = "\x1b[0;48;5;232m";
-							ab_write(&frame, t, sizeof t);
-						}
-						ab_write(&frame, txt + o, step);
-						if(was_emoji) {
-							const char t[] = "\x1b[0m";
-							ab_write(&frame, t, sizeof t);
-						}
-					}
-					o += step;
-
-				}
+			utf8_decode(txt, cells[i].len, &cp);
+			if(was_ambi && i == count - 1) {
+				const char t[] = "\x1b[48;5;1m";
+				ab_write(&frame, t, sizeof t - 1);
 			}
-			else
-				ab_write(&frame, txt, cells[i].len);
+
+			ab_write(&frame, txt, cells[i].len);
+
+			const char t[] = "\x1b[0m";
+			ab_write(&frame, t, sizeof t - 1);
 		}
-
-		/* Instead of check for 0xFE0F (or detect other problematic emojis) just reposition
-		 * the cursor for any multi-byte grapheme cluster. This may be further optimized in
-		 * the future but for now it's a robust way to solve any eventual incongruences.
-		 * It's important to skip this for "glue" char to avoid breaking sequences which
-		 * must always be adiacent (e.g. regional indicator symbols). */
-		int is_glue = (cp >= 0x1F1E6 && cp <= 0x1F1FF);
-		if(cells[i].len > 1 && !is_glue) tui_move_cursor(x, y);
-
-		if(compat_mode) was_emoji = cells[i].len > 1 && !is_glue;
-
+		was_ambi = IS_AMBI(cp);
 	}
 	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }

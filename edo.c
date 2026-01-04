@@ -496,6 +496,11 @@ run(void) {
 				Line *l = vcur->buf->lines[vcur->line_idx];
 				fprintf(stderr, "debug current line (%d):\n", vcur->line_idx);
 				fprintf(stderr, "=== START LINE ===\n");
+
+				unsigned int cp;
+				utf8_decode(l->buf, l->len, &cp);
+
+				fprintf(stderr, "cp=%d\n", cp);
 				for(int i = 0; i < l->len; i++) {
 					if(!(i % 10)) fprintf(stderr, "\n");
 					fprintf(stderr, " 0x%0x", l->buf[i]);
