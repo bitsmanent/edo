@@ -23,7 +23,6 @@
 #define ERASECHAR       "\33[1X"
 
 #define IS_RIS(c) ((c) >= 0x1F1E6 && (c) <= 0x1F1FF)
-#define IS_AMBI(c) ((c) >= 0x2100 && (c) <= 0x26FF)
 
 typedef struct {
 	char *buf;
@@ -193,7 +192,6 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 	char *txt;
 	unsigned int cp = 0;
 	int was_emoji = 0;
-	int was_ambi = 0;
 	int i;
 
 	tui_move_cursor(x, y);
@@ -219,16 +217,11 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 					if(w > 0) cw = w;
 
 					if(was_emoji) {
-						if(was_ambi && i == count - 1) {
-							const char t2[] = "\x1b[48;5;1m";
-							ab_write(&frame, t2, sizeof t2 - 1);
-						} else {
-							const char t[] = "\x1b[48;5;232m";
-							ab_write(&frame, t, sizeof t - 1);
+						const char t[] = "\x1b[48;5;232m";
+						ab_write(&frame, t, sizeof t - 1);
 
-							/* clear eventual garbage state */
-							ab_write(&frame, ERASECHAR, strlen(ERASECHAR));
-						}
+						/* clear eventual garbage state */
+						ab_write(&frame, ERASECHAR, strlen(ERASECHAR));
 					}
 
 					ab_write(&frame, txt + o, step);
@@ -257,7 +250,6 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 
 		was_emoji = cells[i].len > 1 || IS_RIS(cp);
 		if(was_emoji) tui_move_cursor(x, y);
-		was_ambi = IS_AMBI(cp);
 	}
 	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
@@ -273,8 +265,7 @@ tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
 	}
 
 	char *txt;
-	unsigned int cp;
-	int was_ambi = 0, i;
+	int i;
 
 	tui_move_cursor(x, y);
 	for(i = 0; i < count; i++) {
@@ -284,19 +275,8 @@ tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
 		/* TODO: temp code for testing, we'll se how to deal with this later */
 		if(txt[0] == '\t')
 			ab_printf(&frame, "%*s", cells[i].width, " ");
-		else {
-			utf8_decode(txt, cells[i].len, &cp);
-			if(was_ambi && i == count - 1) {
-				const char t[] = "\x1b[48;5;1m";
-				ab_write(&frame, t, sizeof t - 1);
-			}
-
+		else
 			ab_write(&frame, txt, cells[i].len);
-
-			const char t[] = "\x1b[0m";
-			ab_write(&frame, t, sizeof t - 1);
-		}
-		was_ambi = IS_AMBI(cp);
 	}
 	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
