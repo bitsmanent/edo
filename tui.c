@@ -217,11 +217,9 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 					if(w > 0) cw = w;
 
 					if(was_emoji) {
-						const char t[] = "\x1b[48;5;232m";
+						/* ERASECHAR to clear eventual garbage state */
+						const char t[] = "\x1b[48;5;232m"ERASECHAR;
 						ab_write(&frame, t, sizeof t - 1);
-
-						/* clear eventual garbage state */
-						ab_write(&frame, ERASECHAR, strlen(ERASECHAR));
 					}
 
 					ab_write(&frame, txt + o, step);
@@ -251,6 +249,13 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 		was_emoji = cells[i].len > 1 || IS_RIS(cp);
 		if(was_emoji) tui_move_cursor(x, y);
 	}
+
+	/* TODO: this only happens with ambi characters? */
+	if(was_emoji) {
+		const char t[] = "\x1b[48;5;232m \x1b[0m";
+		ab_write(&frame, t, sizeof t - 1);
+	}
+
 	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
 
