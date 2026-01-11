@@ -231,8 +231,10 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 			}
 
 			/* pad clusters having unexpected width */
-			if(cw < cells[i].width)
+			if(cw < cells[i].width) {
+				tui_move_cursor(x + cw, y);
 				while(cw++ < cells[i].width) ab_write(&frame, " ", 1);
+			}
 
 			/* no more visual characters expected for this cell */
 			if(neederase) break;
