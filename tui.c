@@ -22,6 +22,7 @@
 #define CURSHOW         "\33[?25h"
 #define ERASECHAR       "\33[1X"
 
+/* UTF-8 Regional Indicator Symbol */
 #define IS_RIS(c) ((c) >= 0x1F1E6 && (c) <= 0x1F1FF)
 
 typedef struct {
@@ -190,75 +191,59 @@ tui_move_cursor(int c, int r) {
 void
 tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 	char *txt;
-	unsigned int cp = 0;
-	int was_emoji = 0;
-	int i;
+	int neederase, i;
 
 	tui_move_cursor(x, y);
 	for(i = 0; i < count; i++) {
-		x += cells[i].width;
 		txt = cell_get_text(cells + i, ui->pool.data);
 
-		int cw = cells[i].width;
+		unsigned int cp;
+		int o = 0;
 
-		/* TODO: temp code for testing, we'll se how to deal with this later */
-		if(txt[0] == '\t') {
-			ab_printf(&frame, "%*s", cells[i].width, " ");
-		} else {
-			int o = 0;
+		neederase = 0;
+		while(o < cells[i].len) {
+			int step = utf8_decode(txt + o, cells[i].len - o, &cp);
+			int w = wcwidth(cp);
+			int cw = w > 0 ? w : cells[i].width;
 
-			while(o < cells[i].len) {
-				int step = utf8_decode(txt + o, cells[i].len - o, &cp);
+			if(cells[i].len > 1 && (cells[i].width == 1 || IS_RIS(cp)))
+				neederase = 1;
 
-				if(cp == 0x200D) {
-					ab_write(&frame, "<200d>", cells[i].width);
-				} else {
-					int w = wcwidth(cp);
-					if(w > 0) cw = w;
-
-					if(was_emoji) {
-						/* ERASECHAR to clear eventual garbage state */
-						const char t[] = "\x1b[48;5;232m"ERASECHAR;
-						ab_write(&frame, t, sizeof t - 1);
-					}
-
-					ab_write(&frame, txt + o, step);
-
-					if(was_emoji) {
-						const char t[] = "\x1b[0m";
-						ab_write(&frame, t, sizeof t - 1);
-					}
+			switch(cp) {
+			case 0x200D:
+				ab_write(&frame, "<200d>", cells[i].width);
+				break;
+			case '\t':
+				for(int t = 0; t < cells[i].width; t++)
+					ab_write(&frame, " ", 1);
+				break;
+			default:
+				if(neederase) {
+					const char t[] = "\x1b[48;5;232m"ERASECHAR;
+					ab_write(&frame, t, sizeof t - 1);
 				}
-				o += step;
+				ab_write(&frame, txt + o, step);
+				if(neederase) {
+					const char t[] = "\x1b[0m";
+					ab_write(&frame, t, sizeof t - 1);
+				}
+				break;
 			}
+
+			/* pad clusters having unexpected width */
+			if(cw < cells[i].width)
+				while(cw++ < cells[i].width) ab_write(&frame, " ", 1);
+
+			/* no more visual characters expected for this cell */
+			if(neederase) break;
+
+			o += step;
 		}
 
-		/* pad if needed */
-		if(cw < cells[i].width) {
-			tui_move_cursor(x - cells[i].width + cw, y);
-
-			const char t[] = "\x1b[48;5;233m";
-			ab_write(&frame, t, sizeof t - 1);
-
-			while(cw++ < cells[i].width) ab_write(&frame, " ", 1);
-
-			const char t2[] = "\x1b[0m";
-			ab_write(&frame, t2, sizeof t2 - 1);
-		}
-
-		was_emoji = cells[i].len > 1 || IS_RIS(cp);
-		if(was_emoji) tui_move_cursor(x, y);
+		x += cells[i].width;
 	}
-
-	/* TODO: this only happens with ambi characters? */
-	if(was_emoji) {
-		const char t[] = "\x1b[48;5;232m \x1b[0m";
-		ab_write(&frame, t, sizeof t - 1);
-	}
-
 	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
-
 
 void
 tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
