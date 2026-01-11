@@ -21,6 +21,7 @@
 #define CURHIDE         "\33[?25l"
 #define CURSHOW         "\33[?25h"
 #define ERASECHAR       "\33[1X"
+#define ZWNJ            "\xe2\x80\x8c"
 
 /* UTF-8 Regional Indicator Symbol */
 #define IS_RIS(c) ((c) >= 0x1F1E6 && (c) <= 0x1F1FF)
@@ -191,7 +192,7 @@ tui_move_cursor(int c, int r) {
 void
 tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 	char *txt;
-	int neederase, i;
+	int i;
 
 	tui_move_cursor(x, y);
 	for(i = 0; i < count; i++) {
@@ -200,13 +201,10 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 		unsigned int cp;
 		int o = 0;
 
-		neederase = 0;
 		while(o < cells[i].len) {
 			int step = utf8_decode(txt + o, cells[i].len - o, &cp);
 			int cw = cells[i].width;
-
-			if(cells[i].len > 1 && (cells[i].width == 1 || IS_RIS(cp)))
-				neederase = 1;
+			int neederase = cells[i].len > 1 && (cells[i].width == 1 || IS_RIS(cp));
 
 			switch(cp) {
 			case 0x200D:
@@ -220,13 +218,24 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 			default:
 				/* don't expect negative values here */
 				cw = wcwidth(cp);
-				assert(cw >= 0);
+				if(cw < 0) cw = 0;
 
 				if(neederase) {
 					const char t[] = "\x1b[48;5;232m"ERASECHAR;
 					ab_write(&frame, t, sizeof t - 1);
 				}
+
 				ab_write(&frame, txt + o, step);
+
+				/* to preserve coherence between terminals always split RIS
+				 * so that we can see individual components. This is needed
+				 * to ensure cursor synchronization between terminals that
+				 * renders the same glyph with 2 different widths. */
+				if(IS_RIS(cp)) {
+					const char t[] = ZWNJ;
+					ab_write(&frame, t, sizeof t - 1);
+				}
+
 				if(neederase) {
 					const char t[] = "\x1b[0m";
 					ab_write(&frame, t, sizeof t - 1);
