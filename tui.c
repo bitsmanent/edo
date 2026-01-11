@@ -203,21 +203,25 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 		neederase = 0;
 		while(o < cells[i].len) {
 			int step = utf8_decode(txt + o, cells[i].len - o, &cp);
-			int w = wcwidth(cp);
-			int cw = w > 0 ? w : cells[i].width;
+			int cw = cells[i].width;
 
 			if(cells[i].len > 1 && (cells[i].width == 1 || IS_RIS(cp)))
 				neederase = 1;
 
 			switch(cp) {
 			case 0x200D:
-				ab_write(&frame, "<200d>", cells[i].width);
+				/* TODO: temporarly hardcode, must *always* match cells[i].width */
+				ab_write(&frame, "<200d>", 6);
 				break;
 			case '\t':
 				for(int t = 0; t < cells[i].width; t++)
 					ab_write(&frame, " ", 1);
 				break;
 			default:
+				/* don't expect negative values here */
+				cw = wcwidth(cp);
+				assert(cw >= 0);
+
 				if(neederase) {
 					const char t[] = "\x1b[48;5;232m"ERASECHAR;
 					ab_write(&frame, t, sizeof t - 1);
@@ -232,7 +236,11 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 
 			/* pad clusters having unexpected width */
 			if(cw < cells[i].width) {
+				/* this is needed to handle inconsistences between terminals
+				 * whose may use single cell or 2-cell cursors for the same
+				 * exact character. */
 				tui_move_cursor(x + cw, y);
+
 				while(cw++ < cells[i].width) ab_write(&frame, " ", 1);
 			}
 
