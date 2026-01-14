@@ -15,16 +15,13 @@
 #include "utf8.h"
 #include "ui.h"
 
-#define CURPOS          "\33[%d;%dH"
-//#define CLEARLEFT       "\33[1K"
-#define CLEARRIGHT      "\33[0K"
-#define CURHIDE         "\33[?25l"
-#define CURSHOW         "\33[?25h"
-#define ERASECHAR       "\33[1X"
-#define ZWNJ            "\xe2\x80\x8c"
-
-/* UTF-8 Regional Indicator Symbol */
-#define IS_RIS(c) ((c) >= 0x1F1E6 && (c) <= 0x1F1FF)
+#define ESC             "\x1b"
+#define CURPOS          ESC"[%d;%dH"
+#define CLEARRIGHT      ESC"[0K"
+#define CURHIDE         ESC"[?25l"
+#define CURSHOW         ESC"[?25h"
+//#define CLEARLEFT       ESC"[1K"
+//#define ERASECHAR       ESC"[1X"
 
 typedef struct {
 	char *buf;
@@ -118,12 +115,12 @@ ab_flush(Abuf *ab) {
 
 void
 tui_frame_start(void) {
-	ab_printf(&frame, CURHIDE);
+	ab_write(&frame, CURHIDE, sizeof CURHIDE - 1);
 }
 
 void
 tui_frame_flush(void) {
-	ab_printf(&frame, CURSHOW);
+	ab_write(&frame, CURSHOW, sizeof CURSHOW - 1);
 	ab_flush(&frame);
 }
 
@@ -143,11 +140,8 @@ tui_text_width(char *s, int len, int x) {
 
 		wc = -1;
 		if(compat_mode) {
-			if(cp == 0x200D) {
-				w += 6;
-				continue;
-			}
-			if(IS_RIS(cp)) wc = 2;
+			if(cp == 0x200D) wc = 6;
+			else if(IS_RIS(cp)) wc = 2;
 		} else {
 			/* force 2 cells width for emoji followed by VS16 */
 			int nxi = i + step;
@@ -200,30 +194,54 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 
 		unsigned int cp;
 		int o = 0;
+		int vw = 0;
 
 		while(o < cells[i].len) {
 			int step = utf8_decode(txt + o, cells[i].len - o, &cp);
 			int cw = cells[i].width;
 			int neederase = cells[i].len > 1 && (cells[i].width == 1 || IS_RIS(cp));
+			char tag[] = "<200d>";
+			int tagw = 6;
+			int offset = 0;
 
 			switch(cp) {
 			case 0x200D:
-				/* TODO: temporarly hardcode, must *always* match cells[i].width */
-				ab_write(&frame, "<200d>", 6);
+				/* TODO: */
+				if(cells[i].flags & CELL_TRUNC_L) {
+					offset = tagw - cells[i].width;
+					if(offset < 0) offset = 0;
+				}
+				int len_to_print = cells[i].width;
+				assert(offset + len_to_print <= tagw);
+
+				if(len_to_print > 0) ab_write(&frame, tag + offset, len_to_print);
 				break;
 			case '\t':
 				for(int t = 0; t < cells[i].width; t++)
 					ab_write(&frame, " ", 1);
 				break;
 			default:
+				if(cells[i].flags & CELL_TRUNC_L) {
+					if(!cells[i].width) break;
+					ab_write(&frame, "<", 1);
+					cw = 1;
+					break;
+				}
+				if(cells[i].flags & CELL_TRUNC_R) {
+					if(!cells[i].width) break;
+					ab_write(&frame, ">", 1);
+					cw = 1;
+					break;
+				}
+
+				if(neederase) {
+					const char t[] = ESC"[48;5;232m";
+					ab_write(&frame, t, sizeof t - 1);
+				}
+
 				/* don't expect negative values here */
 				cw = wcwidth(cp);
 				if(cw < 0) cw = 0;
-
-				if(neederase) {
-					const char t[] = "\x1b[48;5;232m"ERASECHAR;
-					ab_write(&frame, t, sizeof t - 1);
-				}
 
 				ab_write(&frame, txt + o, step);
 
@@ -231,27 +249,19 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 				 * so that we can see individual components. This is needed
 				 * to ensure cursor synchronization between terminals that
 				 * renders the same glyph with 2 different widths. */
-				if(IS_RIS(cp)) {
-					const char t[] = ZWNJ;
-					ab_write(&frame, t, sizeof t - 1);
-				}
+				if(IS_RIS(cp)) ab_write(&frame, ZWNJ, sizeof ZWNJ - 1);
 
 				if(neederase) {
-					const char t[] = "\x1b[0m";
+					const char t[] = ESC"[0m";
 					ab_write(&frame, t, sizeof t - 1);
 				}
 				break;
 			}
 
-			/* pad clusters having unexpected width */
-			if(cw < cells[i].width) {
-				/* this is needed to handle inconsistences between terminals
-				 * whose may use single cell or 2-cell cursors for the same
-				 * exact character. */
-				tui_move_cursor(x + cw, y);
+			vw += cw;
 
-				while(cw++ < cells[i].width) ab_write(&frame, " ", 1);
-			}
+			/* stop processing after truncation */
+			if(cells[i].flags & (CELL_TRUNC_L | CELL_TRUNC_R)) break;
 
 			/* no more visual characters expected for this cell */
 			if(neederase) break;
@@ -259,11 +269,23 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 			o += step;
 		}
 
+		/* pad clusters having unexpected width */
+		if(vw < cells[i].width) {
+			/* this is needed to handle inconsistences between terminals
+			 * whose may use single cell or 2-cell cursors for the same
+			 * exact character. */
+			tui_move_cursor(x + vw, y);
+
+			while(vw++ < cells[i].width) ab_write(&frame, " ", 1);
+		}
+
 		x += cells[i].width;
 	}
-	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
+
+	if(x < ws.ws_col) ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
 
+/* TODO: add support for cell flags */
 void
 tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
 	assert(x < ws.ws_col && y < ws.ws_row);
@@ -310,7 +332,14 @@ tui_init(void) {
 	setlocale(LC_CTYPE, "");
 	tcgetattr(0, &origti);
 	cfmakeraw(&ti);
+
 	ti.c_iflag |= ICRNL;
+	/*
+	ti.c_iflag &= ~(BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL|IXON);
+	ti.c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
+	ti.c_cflag &= ~(CSIZE|PARENB);
+	ti.c_cflag |= CS8;
+	*/
 	ti.c_cc[VMIN] = 1;
 	ti.c_cc[VTIME] = 0;
 	tcsetattr(0, TCSAFLUSH, &ti);

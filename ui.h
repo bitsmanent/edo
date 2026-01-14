@@ -27,6 +27,12 @@ typedef struct {
 	size_t len;
 } TextPool;
 
+enum CellFlags {
+	CELL_DEFAULT,
+	CELL_TRUNC_L,
+	CELL_TRUNC_R
+};
+
 #define CELL_POOL_THRESHOLD 8
 typedef struct {
 	union {
@@ -35,6 +41,7 @@ typedef struct {
 	} data;
 	uint16_t len;
 	uint16_t width;
+	int flags;
 } Cell;
 
 typedef struct UI UI;

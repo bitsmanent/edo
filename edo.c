@@ -384,11 +384,10 @@ render(Cell *cells, char *buf, int buflen, int xoff, int cols) {
 		len = ui->text_len(buf + i, buflen - i);
 		w = ui->text_width(buf + i, len, vx);
 
-		if(vx + w <= xoff) goto next; /* horizontal scroll */
-
+		/* horizontal scroll skip */
+		if(vx + w <= xoff) goto next;
 		x = vx - xoff;
 		if(x >= cols) break; /* screen has been filled */
-		if(x + w > cols) break; /* truncated character (TODO: draw a symbol?) */
 
 		if(len > CELL_POOL_THRESHOLD)
 			cells[nc].data.pool_idx = textpool_insert(&ui->pool, buf + i, len);
@@ -396,10 +395,21 @@ render(Cell *cells, char *buf, int buflen, int xoff, int cols) {
 			memcpy(cells[nc].data.text, buf + i, len);
 
 		cells[nc].len = len;
-		cells[nc].width = w;
+		cells[nc].flags = 0;
 
-		/* TODO: handle truncated multi-column characters */
-		if(vx < xoff) cells[nc].width -= xoff - vx; /* partial rendering */
+		if(x + w > cols) {
+			cells[nc].flags |= CELL_TRUNC_R;
+			w = cols - x;
+			cells[nc].width = w;
+			nc++;
+			break;
+		}
+
+		cells[nc].width = w;
+		if(vx < xoff) {
+			cells[nc].flags |= CELL_TRUNC_L;
+			cells[nc].width -= (xoff - vx);
+		}
 
 		++nc;
 next:
