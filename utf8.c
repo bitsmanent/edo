@@ -1,10 +1,9 @@
 #define _XOPEN_SOURCE
 #include <wchar.h>
 #include <grapheme.h>
+#include <utf8proc.h>
 
-int utf8_len(char *buf, int len);
-int utf8_decode(char *buf, int len, unsigned int *cp);
-size_t utf8_len_compat(char *buf, int len);
+#include "utf8.h"
 
 size_t
 utf8_len_compat(char *buf, int len) {
@@ -12,10 +11,12 @@ utf8_len_compat(char *buf, int len) {
 	int step, i;
 
 	i = step = utf8_decode(buf, len, &cp);
-	if(wcwidth(cp) < 0) return step;
+	//if(wcwidth(cp) >= 0) return step;
+	if(!utf8_is_combining(cp) && wcwidth(cp) < 0) return step;
 	while(i < len) {
 		step = utf8_decode(buf + i, len - i, &cp);
-		if(cp == 0x200D || wcwidth(cp)) break;
+		//if(wcwidth(cp) >= 0) break;
+		if(!utf8_is_combining(cp) || wcwidth(cp)) break;
 		i += step;
 	}
 	return i;
@@ -29,4 +30,12 @@ utf8_len(char *buf, int len) {
 int
 utf8_decode(char *buf, int len, unsigned int *cp) {
 	return grapheme_decode_utf8(buf, len, cp);
+}
+
+int
+utf8_is_combining(unsigned int cp) {
+	const utf8proc_property_t *prop = utf8proc_get_property(cp);
+
+	return (prop->category == UTF8PROC_CATEGORY_MN
+			|| prop->category == UTF8PROC_CATEGORY_ME);
 }

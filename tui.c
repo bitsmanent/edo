@@ -124,6 +124,18 @@ tui_frame_flush(void) {
 	ab_flush(&frame);
 }
 
+/* XXX move to utils? */
+int
+hexlen(unsigned int n) {
+	int len = 0;
+
+	do {
+		len++;
+		n >>= 4;
+	} while(n > 0);
+	return len;
+}
+
 int
 tui_text_width(char *s, int len, int x) {
 	int tabstop = 8;
@@ -140,22 +152,24 @@ tui_text_width(char *s, int len, int x) {
 
 		wc = -1;
 		if(compat_mode) {
-			if(cp == 0x200D) wc = 6;
-			else if(IS_RIS(cp)) wc = 2;
+			if(IS_RIS(cp)) wc = 2;
 		} else {
 			/* force 2 cells width for emoji followed by VS16 */
 			int nxi = i + step;
 			if(nxi < len) {
 				unsigned int nxcp;
 				utf8_decode(s + nxi, len - nxi, &nxcp);
-
 				if(nxcp == 0xFE0F && ((cp >= 0x203C && cp <= 0x3299) || cp >= 0x1F000))
 					wc = 2;
 			}
 		}
 
-		if(wc == -1) wc = wcwidth(cp);
+		if(wc < 0) wc = wcwidth(cp);
+		assert(wc != -1);
+
 		if(wc > 0) w += wc;
+		else if(!utf8_is_combining(cp)) w += hexlen(cp) + 2; /* 2 for < and > */
+		//else w += hexlen(cp) + 2; /* 2 for < and > */
 	}
 	return w;
 }
@@ -200,35 +214,39 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 			int step = utf8_decode(txt + o, cells[i].len - o, &cp);
 			int cw = cells[i].width;
 			int neederase = cells[i].len > 1 && (cells[i].width == 1 || IS_RIS(cp));
-			char tag[] = "<200d>";
-			int tagw = 6;
-			int offset = 0;
 
 			switch(cp) {
-			case 0x200D:
-				/* TODO: */
-				if(cells[i].flags & CELL_TRUNC_L) {
-					offset = tagw - cells[i].width;
-					if(offset < 0) offset = 0;
-				}
-				int len_to_print = cells[i].width;
-				assert(offset + len_to_print <= tagw);
-
-				if(len_to_print > 0) ab_write(&frame, tag + offset, len_to_print);
-				break;
 			case '\t':
 				for(int t = 0; t < cells[i].width; t++)
 					ab_write(&frame, " ", 1);
 				break;
 			default:
-				if(cells[i].flags & CELL_TRUNC_L) {
+				cw = wcwidth(cp);
+				if(cw < 0) break;
+
+				if(!cw) {
 					if(!cells[i].width) break;
+
+					char tag[16];
+					snprintf(tag, sizeof tag, "<%0x>", cp);
+
+					if(cells[i].flags & CELL_TRUNC_L) {
+						cw = tui_text_width(txt + o, cells[i].len, 0);
+						o = cw - cells[i].width;
+						if(o < 0) o = 0;
+					}
+					{ const char t[] = ESC"[48;5;233m"; ab_write(&frame, t, sizeof t - 1); }
+					cw = ab_printf(&frame, "%.*s", cells[i].width, tag + o);
+					{ const char t[] = ESC"[0m"; ab_write(&frame, t, sizeof t - 1); }
+					break;
+				}
+
+				if(cells[i].flags & CELL_TRUNC_L) {
 					ab_write(&frame, "<", 1);
 					cw = 1;
 					break;
 				}
 				if(cells[i].flags & CELL_TRUNC_R) {
-					if(!cells[i].width) break;
 					ab_write(&frame, ">", 1);
 					cw = 1;
 					break;
@@ -238,10 +256,6 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 					const char t[] = ESC"[48;5;232m";
 					ab_write(&frame, t, sizeof t - 1);
 				}
-
-				/* don't expect negative values here */
-				cw = wcwidth(cp);
-				if(cw < 0) cw = 0;
 
 				ab_write(&frame, txt + o, step);
 

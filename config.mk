@@ -8,7 +8,7 @@ MANPREFIX = ${PREFIX}/share/man
 # flags
 CPPFLAGS = -D_DEFAULT_SOURCE -DVERSION=\"${VERSION}\"
 CFLAGS   = -std=c99 -g -pedantic -Wall -O0 ${CPPFLAGS}
-LDFLAGS  = -lgrapheme
+LDFLAGS  = -lgrapheme -lutf8proc
 #CFLAGS  = -std=c99 -pedantic -Wall -Wno-deprecated-declarations -Os ${CPPFLAGS}
 
 # compiler and linker
