@@ -168,7 +168,7 @@ tui_text_width(char *s, int len, int x) {
 		assert(wc != -1);
 
 		if(wc > 0) w += wc;
-		else if(!utf8_is_combining(cp)) w += hexlen(cp) + 2; /* 2 for < and > */
+		else if(compat_mode && !utf8_is_combining(cp)) w += hexlen(cp) + 2; /* 2 for < and > */
 		//else w += hexlen(cp) + 2; /* 2 for < and > */
 	}
 	return w;
