@@ -34,6 +34,7 @@ struct termios origti;
 struct winsize ws;
 Abuf frame;
 int compat_mode;
+int split_ris; /* split RIS characters in-between with a ZWNJ */
 
 /* TODO: edo.h? */
 extern void *ecalloc(size_t nmemb, size_t size);
@@ -222,6 +223,7 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 				break;
 			default:
 				cw = wcwidth(cp);
+				//cw = tui_text_width(txt + o, cells[i].len - o, x);
 				if(cw < 0) break;
 
 				if(!cw) {
@@ -263,7 +265,10 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 				 * so that we can see individual components. This is needed
 				 * to ensure cursor synchronization between terminals that
 				 * renders the same glyph with 2 different widths. */
-				if(IS_RIS(cp)) ab_write(&frame, ZWNJ, sizeof ZWNJ - 1);
+				if(split_ris && IS_RIS(cp)) {
+					ab_write(&frame, ZWNJ, sizeof ZWNJ - 1);
+					++cw;
+				}
 
 				if(neederase) {
 					const char t[] = ESC"[0m";
@@ -284,14 +289,8 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 		}
 
 		/* pad clusters having unexpected width */
-		if(vw < cells[i].width) {
-			/* this is needed to handle inconsistences between terminals
-			 * whose may use single cell or 2-cell cursors for the same
-			 * exact character. */
-			tui_move_cursor(x + vw, y);
-
+		if(vw < cells[i].width)
 			while(vw++ < cells[i].width) ab_write(&frame, " ", 1);
-		}
 
 		x += cells[i].width;
 	}
@@ -360,9 +359,8 @@ tui_init(void) {
 	setbuf(stdout, NULL);
 	ioctl(0, TIOCGWINSZ, &ws);
 
-	/* check for compat mode */
-	/* TODO: auto-detect */
-	compat_mode = 1;
+	compat_mode = 1; /* TODO: auto-detect */
+	split_ris = 0; /* split RIS clusters */
 }
 
 int
