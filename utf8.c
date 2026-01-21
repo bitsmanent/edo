@@ -11,11 +11,9 @@ utf8_len_compat(char *buf, int len) {
 	int step, i;
 
 	i = step = utf8_decode(buf, len, &cp);
-	//if(wcwidth(cp) >= 0) return step;
 	if(!utf8_is_combining(cp) && wcwidth(cp) < 0) return step;
 	while(i < len) {
 		step = utf8_decode(buf + i, len - i, &cp);
-		//if(wcwidth(cp) >= 0) break;
 		if(!utf8_is_combining(cp) || wcwidth(cp)) break;
 		i += step;
 	}

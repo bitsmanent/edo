@@ -34,7 +34,6 @@ struct termios origti;
 struct winsize ws;
 Abuf frame;
 int compat_mode;
-int split_ris; /* split RIS characters in-between with a ZWNJ */
 
 /* TODO: edo.h? */
 extern void *ecalloc(size_t nmemb, size_t size);
@@ -214,7 +213,7 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 		while(o < cells[i].len) {
 			int step = utf8_decode(txt + o, cells[i].len - o, &cp);
 			int cw = cells[i].width;
-			int neederase = cells[i].len > 1 && (cells[i].width == 1 || IS_RIS(cp));
+			int neederase = cells[i].len > 1 && (cells[i].width == 1);
 
 			switch(cp) {
 			case '\t':
@@ -223,7 +222,6 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 				break;
 			default:
 				cw = wcwidth(cp);
-				//cw = tui_text_width(txt + o, cells[i].len - o, x);
 				if(cw < 0) break;
 
 				if(!cw) {
@@ -260,16 +258,12 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 				}
 
 				ab_write(&frame, txt + o, step);
-
+#if 0
 				/* to preserve coherence between terminals always split RIS
-				 * so that we can see individual components. This is needed
-				 * to ensure cursor synchronization between terminals that
-				 * renders the same glyph with 2 different widths. */
-				if(split_ris && IS_RIS(cp)) {
+				 * so that we can see individual components. */
+				if(IS_RIS(cp))
 					ab_write(&frame, ZWNJ, sizeof ZWNJ - 1);
-					++cw;
-				}
-
+#endif
 				if(neederase) {
 					const char t[] = ESC"[0m";
 					ab_write(&frame, t, sizeof t - 1);
@@ -278,7 +272,6 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 			}
 
 			vw += cw;
-
 			/* stop processing after truncation */
 			if(cells[i].flags & (CELL_TRUNC_L | CELL_TRUNC_R)) break;
 
@@ -288,7 +281,7 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 			o += step;
 		}
 
-		/* pad clusters having unexpected width */
+		/* pad glyph having unexpected width */
 		if(vw < cells[i].width)
 			while(vw++ < cells[i].width) ab_write(&frame, " ", 1);
 
@@ -298,7 +291,6 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 	if(x < ws.ws_col) ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
 
-/* TODO: add support for cell flags */
 void
 tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
 	assert(x < ws.ws_col && y < ws.ws_row);
@@ -319,23 +311,23 @@ tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
 		/* TODO: temp code for testing, we'll se how to deal with this later */
 		if(txt[0] == '\t') {
 			ab_printf(&frame, "%*s", cells[i].width, " ");
-		} else {
-
-			if(cells[i].flags & CELL_TRUNC_L) {
-				ab_write(&frame, "<", 1);
-				for(int j = 1; j < cells[i].width; ++j)
-					ab_write(&frame, ".", 1);
-				continue;
-			}
-			if(cells[i].flags & CELL_TRUNC_R) {
-				ab_write(&frame, ">", 1);
-				for(int j = 1; j < cells[i].width; ++j)
-					ab_write(&frame, ".", 1);
-				continue;
-			}
-
-			ab_write(&frame, txt, cells[i].len);
+			continue;
 		}
+
+		if(cells[i].flags & CELL_TRUNC_L) {
+			ab_write(&frame, "<", 1);
+			for(int j = 1; j < cells[i].width; ++j)
+				ab_write(&frame, ".", 1);
+			continue;
+		}
+		if(cells[i].flags & CELL_TRUNC_R) {
+			ab_write(&frame, ">", 1);
+			for(int j = 1; j < cells[i].width; ++j)
+				ab_write(&frame, ".", 1);
+			continue;
+		}
+
+		ab_write(&frame, txt, cells[i].len);
 	}
 	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
@@ -374,8 +366,7 @@ tui_init(void) {
 	setbuf(stdout, NULL);
 	ioctl(0, TIOCGWINSZ, &ws);
 
-	compat_mode = 0; /* TODO: auto-detect */
-	split_ris = compat_mode && 0; /* split RIS clusters */
+	compat_mode = 1; /* TODO: auto-detect but toggable (upward only) */
 }
 
 int
