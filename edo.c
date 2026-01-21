@@ -426,7 +426,6 @@ view_place_cursor(View *v) {
 	Line *l;
 	int x, y;
 
-	x = v->col_off;
 	l = buffer_get_line(v->buf, v->line_idx);
 	if(l) {
 		x = view_idx2col(v, l, v->col_idx);

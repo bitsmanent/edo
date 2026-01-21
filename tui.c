@@ -317,10 +317,25 @@ tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
 		txt = cell_get_text(cells + i, ui->pool.data);
 
 		/* TODO: temp code for testing, we'll se how to deal with this later */
-		if(txt[0] == '\t')
+		if(txt[0] == '\t') {
 			ab_printf(&frame, "%*s", cells[i].width, " ");
-		else
+		} else {
+
+			if(cells[i].flags & CELL_TRUNC_L) {
+				ab_write(&frame, "<", 1);
+				for(int j = 1; j < cells[i].width; ++j)
+					ab_write(&frame, ".", 1);
+				continue;
+			}
+			if(cells[i].flags & CELL_TRUNC_R) {
+				ab_write(&frame, ">", 1);
+				for(int j = 1; j < cells[i].width; ++j)
+					ab_write(&frame, ".", 1);
+				continue;
+			}
+
 			ab_write(&frame, txt, cells[i].len);
+		}
 	}
 	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
@@ -359,8 +374,8 @@ tui_init(void) {
 	setbuf(stdout, NULL);
 	ioctl(0, TIOCGWINSZ, &ws);
 
-	compat_mode = 1; /* TODO: auto-detect */
-	split_ris = 0; /* split RIS clusters */
+	compat_mode = 0; /* TODO: auto-detect */
+	split_ris = compat_mode && 0; /* split RIS clusters */
 }
 
 int
