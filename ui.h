@@ -28,6 +28,7 @@ typedef struct {
 } TextPool;
 
 enum CellFlags {
+	CELL_DEFAULT,
 	CELL_TRUNC_L,
 	CELL_TRUNC_R
 };

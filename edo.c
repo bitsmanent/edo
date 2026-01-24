@@ -337,7 +337,7 @@ view_idx2col(View *v, Line *line, int target_idx) {
 
 	if (target_idx > line->len) target_idx = line->len;
 
-	while (i < target_idx) {
+	while(i < target_idx) {
 		len = ui->text_len(line->buf + i, line->len - i);
 		x += ui->text_width(line->buf + i, len, x);
 		i += len;

@@ -3,9 +3,10 @@
 #include <wchar.h>
 
 #include <assert.h>
+#include <locale.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <locale.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -34,6 +35,8 @@ struct termios origti;
 struct winsize ws;
 Abuf frame;
 int compat_mode;
+int is_modern;
+int vs16_double = 1;
 
 /* TODO: edo.h? */
 extern void *ecalloc(size_t nmemb, size_t size);
@@ -151,10 +154,16 @@ tui_text_width(char *s, int len, int x) {
 		}
 
 		wc = -1;
-		if(compat_mode) {
-			if(IS_RIS(cp)) wc = 2;
-		} else {
-			/* force 2 cells width for emoji followed by VS16 */
+
+		/* force RIS to be 2-cells wide */
+		if(compat_mode && IS_RIS(cp)) wc = 2;
+
+		/* color modifier is zero-width in modern terminals while legacy
+		 * VTs are able to see the square color modifiers */
+		if(is_modern && IS_CMOD(cp)) wc = 0;
+
+		/* force 2 cells width for emoji followed by VS16 */
+		if(vs16_double && is_modern && wc == -1) {
 			int nxi = i + step;
 			if(nxi < len) {
 				unsigned int nxcp;
@@ -206,86 +215,91 @@ tui_draw_line_compat(UI *ui, int x, int y, Cell *cells, int count) {
 	for(i = 0; i < count; i++) {
 		txt = cell_get_text(cells + i, ui->pool.data);
 
-		unsigned int cp;
+		int w = 0;
 		int o = 0;
-		int vw = 0;
 
-		while(o < cells[i].len) {
+		while(o < cells[i].len && w < cells[i].width) {
+			unsigned int cp;
 			int step = utf8_decode(txt + o, cells[i].len - o, &cp);
-			int cw = cells[i].width;
-			int neederase = cells[i].len > 1 && (cells[i].width == 1);
 
-			switch(cp) {
-			case '\t':
-				for(int t = 0; t < cells[i].width; t++)
+			if(cp == '\t') {
+				while(w++ < cells[i].width)
 					ab_write(&frame, " ", 1);
-				break;
-			default:
-				cw = wcwidth(cp);
-				if(cw < 0) break;
-
-				if(!cw) {
-					if(!cells[i].width) break;
-
-					char tag[16];
-					snprintf(tag, sizeof tag, "<%0x>", cp);
-
-					if(cells[i].flags & CELL_TRUNC_L) {
-						cw = tui_text_width(txt + o, cells[i].len, 0);
-						o = cw - cells[i].width;
-						if(o < 0) o = 0;
-					}
-					{ const char t[] = ESC"[48;5;233m"; ab_write(&frame, t, sizeof t - 1); }
-					cw = ab_printf(&frame, "%.*s", cells[i].width, tag + o);
-					{ const char t[] = ESC"[0m"; ab_write(&frame, t, sizeof t - 1); }
-					break;
-				}
-
-				if(cells[i].flags & CELL_TRUNC_L) {
-					ab_write(&frame, "<", 1);
-					cw = 1;
-					break;
-				}
-				if(cells[i].flags & CELL_TRUNC_R) {
-					ab_write(&frame, ">", 1);
-					cw = 1;
-					break;
-				}
-
-				if(neederase) {
-					const char t[] = ESC"[48;5;232m";
-					ab_write(&frame, t, sizeof t - 1);
-				}
-
-				ab_write(&frame, txt + o, step);
-#if 0
-				/* to preserve coherence between terminals always split RIS
-				 * so that we can see individual components. */
-				if(IS_RIS(cp))
-					ab_write(&frame, ZWNJ, sizeof ZWNJ - 1);
-#endif
-				if(neederase) {
-					const char t[] = ESC"[0m";
-					ab_write(&frame, t, sizeof t - 1);
-				}
 				break;
 			}
 
-			vw += cw;
-			/* stop processing after truncation */
-			if(cells[i].flags & (CELL_TRUNC_L | CELL_TRUNC_R)) break;
+			int cw = wcwidth(cp);
+			if(cw < 0) break;
 
-			/* no more visual characters expected for this cell */
-			if(neederase) break;
+			int showhex = !cw && !IS_CMOD(cp) && !IS_VAR(cp) && !utf8_is_combining(cp) ? 1 : 0;
+
+			if(!showhex && is_modern && compat_mode && IS_CMOD(cp)) showhex = 1;
+
+			if(showhex) {
+				char tag[16];
+				snprintf(tag, sizeof tag, "<%0x>", cp);
+
+				if(cells[i].flags & CELL_TRUNC_L) {
+					cw = tui_text_width(txt + o, cells[i].len - o, 0);
+					o = cw - cells[i].width;
+					if(o < 0) o = 0;
+				}
+				{ const char t[] = ESC"[48;5;233m"; ab_write(&frame, t, sizeof t - 1); }
+
+				int j = 0;
+
+				while(w < cells[i].width && x+w < ws.ws_col) {
+					ab_write(&frame, tag + o + j++, 1);
+					++w;
+				}
+
+				{ const char t[] = ESC"[0m"; ab_write(&frame, t, sizeof t - 1); }
+				break;
+			}
+
+			/* to preserve coherence between terminals always split
+			 * RIS so that we can see individual components. */
+			if(is_modern && IS_RIS(cp))
+				ab_write(&frame, ZWNJ, sizeof ZWNJ - 1);
+
+			if(!cw) {
+				ab_write(&frame, txt + o, step);
+				o += step;
+				continue;
+			}
+
+
+			if(cells[i].flags & CELL_TRUNC_L) {
+				ab_write(&frame, "<", 1);
+				++w;
+				while(w++ < cells[i].width) ab_write(&frame, ".", 1);
+				break;
+			}
+			if(cells[i].flags & CELL_TRUNC_R) {
+				ab_write(&frame, ">", 1);
+				++w;
+				while(w++ < cells[i].width) ab_write(&frame, ".", 1);
+				break;
+			}
+
+			if(x+cw > ws.ws_col) break;
+			ab_write(&frame, txt + o, step);
 
 			o += step;
+			w += cw;
+		}
+		//ab_write(&frame, txt, cells[i].len);
+
+		/* pad to ensure we always honor cells[i].width
+		 * should only happens with RIS on legacy VTs */
+		if(!is_modern && w < cells[i].width) {
+			while(w < cells[i].width && x+w < ws.ws_col) {
+				ab_write(&frame, " ", 1);
+				++w;
+			}
 		}
 
-		/* pad glyph having unexpected width */
-		if(vw < cells[i].width)
-			while(vw++ < cells[i].width) ab_write(&frame, " ", 1);
-
-		x += cells[i].width;
+		x += w;
 	}
 
 	if(x < ws.ws_col) ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
@@ -310,7 +324,8 @@ tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
 
 		/* TODO: temp code for testing, we'll se how to deal with this later */
 		if(txt[0] == '\t') {
-			ab_printf(&frame, "%*s", cells[i].width, " ");
+			for(int t = 0; t < cells[i].width; t++)
+				ab_write(&frame, " ", 1);
 			continue;
 		}
 
@@ -329,6 +344,7 @@ tui_draw_line(UI *ui, int x, int y, Cell *cells, int count) {
 
 		ab_write(&frame, txt, cells[i].len);
 	}
+
 	ab_write(&frame, CLEARRIGHT, strlen(CLEARRIGHT));
 }
 
@@ -343,6 +359,50 @@ tui_draw_symbol(int c, int r, Symbol sym) {
 
 	tui_move_cursor(c, r);
 	ab_printf(&frame, "%c" CLEARRIGHT, symch);
+}
+
+int
+detect_width(char *buf, int sz) {
+	int w = 1; /* default for legacy VTs */
+	int len = 0;
+	char *s, *e = NULL;
+
+	/* write an emoji which should be width=1 on legacy VTs and 2 on modern
+	 * ones.
+	 *
+	 * \r start of line
+	 * \xe2\x9d\xa4\xef\xb8\x8f the heart emoji
+	 * \x1b[6n get position
+	 * \r\x1b[K back to the start and clear
+	 *
+	 * We do all in a single write to be more efficient and most important
+	 * to prevent visual glitches. */
+	const char out[] = "\r\xe2\x9d\xa4\xef\xb8\x8f\x1b[6n\r\x1b[K";
+	write(STDOUT_FILENO, out, sizeof out - 1);
+
+	memset(buf, 0, sz);
+
+	/* quick loop max 100ms */
+	struct pollfd fd = {STDIN_FILENO, POLLIN, 0};
+	for(int i = 0; i < 10; i++) {
+		if(poll(&fd, 1, 10) <= 0) continue;
+		int n = read(STDIN_FILENO, buf + len, sz - len - 1);
+		if(n <= 0) continue;
+		len += n;
+		buf[len] = '\0';
+		if((e = strchr(buf, 'R'))) break;
+	}
+
+	s = strstr(buf, "\x1b[");
+	if(s && e) {
+		/* if col is > 2 then emoji is 2-cells wide */
+		char *sc = strchr(s, ';');
+		if(sc && atoi(sc + 1) > 2) w = 2;
+
+		/* remove our test from user buffer */
+		memmove(s, e + 1, len - (e - buf));
+	}
+	return w;
 }
 
 void
@@ -366,7 +426,18 @@ tui_init(void) {
 	setbuf(stdout, NULL);
 	ioctl(0, TIOCGWINSZ, &ws);
 
-	compat_mode = 1; /* TODO: auto-detect but toggable (upward only) */
+	/* auto-detect VT type */
+	char user_input[1024];
+	int emoji_width = detect_width(user_input, sizeof user_input);
+
+	is_modern = emoji_width == 2;
+	if(strlen(user_input)) {
+		die("TODO: user typed while initializing...\n");
+	}
+
+	//die("Is%smodern VT (width=%d)\n", is_modern ? " " : " NOT ", emoji_width);
+	compat_mode = !is_modern; /* TODO: toggable (upward only) */
+	compat_mode = 1; /* currently forced for development */
 }
 
 int

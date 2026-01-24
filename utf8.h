@@ -3,6 +3,12 @@
 /* Regional Indicator Symbol */
 #define IS_RIS(c) ((c) >= 0x1F1E6 && (c) <= 0x1F1FF)
 
+/* Variation Selector */
+#define IS_VAR(c) ((c) >= 0xFE00 && (c) <= 0xFE0F)
+
+/* Color modifier */
+#define IS_CMOD(c) ((c) >= 0x1F3FB && (c) <= 0x1F3FF)
+
 /* Zero-Width Non-Joiner */
 #define ZWNJ "\xe2\x80\x8c"
 
